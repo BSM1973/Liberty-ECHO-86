@@ -1,14 +1,21 @@
 name: ECHO 86 macOS AU VST3
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "JUCE/**"
+      - ".github/workflows/echo86-macos-build.yml"
 jobs:
   macos:
     runs-on: macos-15
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - name: Checkout ECHO 86
+        uses: actions/checkout@v4
+      - name: Checkout JUCE 8
+        uses: actions/checkout@v4
         with:
           repository: juce-framework/JUCE
           ref: 8.0.10
@@ -19,6 +26,16 @@ jobs:
         run: cmake --build build --config Release --parallel 3
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Check macOS bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ext in component vst3 app; do
+            find build -type d -name "*.${ext}" -print -quit | grep -q . || {
+              echo "::error::Missing .${ext} bundle"
+              exit 1
+            }
+          done
       - name: Upload unsigned plugins
         uses: actions/upload-artifact@v4
         with:

@@ -88,7 +88,6 @@ juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter(){return new Echo86Proces
 class Echo86Editor final : public juce::AudioProcessorEditor {
 public:
  explicit Echo86Editor(Echo86Processor& p):AudioProcessorEditor(p),processor(p){
-  setSize(960,1025);
   for(const auto* category:{"TOUS","BASS","LEAD","PAD","KEYS","PLUCK","ARP","STRINGS","FX","INIT"})
    categoryList.addItem(category,categoryList.getNumItems()+1);
   categoryList.setSelectedId(1,juce::dontSendNotification);
@@ -135,6 +134,8 @@ public:
    label->setColour(juce::Label::textColourId,juce::Colour(0xffb6d5db));addAndMakeVisible(label);
    attachments.emplace_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.state,ids[i],*knob));
   }
+  // setSize() synchronously calls resized(): all 24 controls must exist first.
+  setSize(960,1025);
  }
  void paint(juce::Graphics& g)override{
   auto r=getLocalBounds();g.fillAll(juce::Colour(0xff081b29));
@@ -162,6 +163,8 @@ public:
   g.drawText("ECHO 86  /  JUCE EDITION  /  PROTOTYPE",42,1004,870,16,juce::Justification::centredRight);
  }
  void resized()override{
+  // JUCE/hosts may request an early layout while the editor is still being built.
+  if(knobs.size()!=24 || labels.size()!=24) return;
   categoryList.setBounds(210,892,154,26);
   presetList.setBounds(372,892,523,26);
   presetName.setBounds(210,944,325,28);

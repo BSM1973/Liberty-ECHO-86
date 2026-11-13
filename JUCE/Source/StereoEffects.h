@@ -37,7 +37,7 @@ public:
   for(auto* bank:{&chorus,&delay,&reverbA,&reverbB})for(auto& line:*bank)line.clear();
  }
  struct Parameters {
-  float chorusMix=0,chorusRate=.35f,chorusDepth=.5f;
+  float chorusMix=0,chorusRate=.35f,chorusDepth=.5f,chorusWidth=.85f;
   float delayMix=0,delayTime=.35f,delayFeedback=.3f;
   float reverbMix=0,reverbSize=.6f;
  };
@@ -47,7 +47,7 @@ public:
   if(phase>=2*pi)phase-=2*pi;
   for(int c=0;c<2;c++){
    float x=dry[c];
-   float mod=std::sin((float)phase+(c?pi*.5f:0.f));
+   float mod=std::sin((float)phase+(c?pi*std::clamp(p.chorusWidth,0.f,1.f):0.f));
    float ch=chorus[c].tap((.018f+.009f*std::clamp(p.chorusDepth,0.f,1.f)*mod)*(float)sr);
    chorus[c].push(x);
    x=x*(1-std::clamp(p.chorusMix,0.f,1.f)*.5f)+ch*std::clamp(p.chorusMix,0.f,1.f)*.5f;

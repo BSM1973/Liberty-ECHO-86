@@ -1,0 +1,30 @@
+cmake_minimum_required(VERSION 3.22)
+project(ECHO86 VERSION 0.1.0 LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+if(NOT DEFINED JUCE_DIR)
+ message(FATAL_ERROR "Indiquer -DJUCE_DIR=/chemin/vers/JUCE (JUCE 8 requis).")
+endif()
+add_subdirectory("${JUCE_DIR}" JUCE)
+if(APPLE)
+ set(ECHO86_FORMATS AU VST3 Standalone)
+else()
+ set(ECHO86_FORMATS VST3 Standalone)
+endif()
+juce_add_plugin(ECHO86 COMPANY_NAME "Liberty Music Software" BUNDLE_ID "com.libertymusicsoftware.echo86"
+ PLUGIN_MANUFACTURER_CODE LbMS PLUGIN_CODE Ec86
+ FORMATS ${ECHO86_FORMATS} PRODUCT_NAME "ECHO 86"
+ IS_SYNTH TRUE NEEDS_MIDI_INPUT TRUE NEEDS_MIDI_OUTPUT FALSE)
+juce_generate_juce_header(ECHO86)
+target_sources(ECHO86 PRIVATE Source/PluginProcessor.cpp)
+target_compile_definitions(ECHO86 PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_link_libraries(ECHO86 PRIVATE juce::juce_audio_utils juce::juce_audio_processors juce::juce_dsp)
+
+# Native unit tests do not require JUCE modules; they exercise the same DSP headers.
+include(CTest)
+if(BUILD_TESTING)
+ foreach(test_name IN ITEMS test_core test_midi_v43 test_polyphony16_v44 test_advanced_v45 test_effects_v46 test_presets_v47 test_100_presets_v48)
+  add_executable(${test_name} Source/${test_name}.cpp)
+  target_compile_features(${test_name} PRIVATE cxx_std_17)
+  add_test(NAME ${test_name} COMMAND ${test_name})
+ endforeach()
+endif()

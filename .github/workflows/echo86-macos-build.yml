@@ -1,0 +1,30 @@
+name: ECHO 86 macOS AU VST3
+on:
+  workflow_dispatch:
+jobs:
+  macos:
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: juce-framework/JUCE
+          ref: 8.0.10
+          path: .juce-sdk
+      - name: Configure
+        run: cmake -S JUCE -B build -DJUCE_DIR="$GITHUB_WORKSPACE/.juce-sdk" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+      - name: Build
+        run: cmake --build build --config Release --parallel 3
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Upload unsigned plugins
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECHO86-macOS-unsigned
+          path: |
+            build/**/*.component/**
+            build/**/*.vst3/**
+            build/**/*.app/**
+          if-no-files-found: error

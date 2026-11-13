@@ -121,9 +121,11 @@ struct Synth{
  std::array<Voice,maxVoices> voices{};
  uint64_t age=0;double sampleRate=48000;bool sustainPedal=false;
  bool monoMode=false;float glideTime=0;
+ std::array<bool,128> monoHeld{};
+ std::array<float,128> monoVel{};
  void prepare(double sr){sampleRate=sr;panic();}
- void panic(){for(auto& v:voices)v=Voice{};sustainPedal=false;}
- void allNotesOff(){for(auto& v:voices)if(v.active)v.off(false);sustainPedal=false;}
+ void panic(){for(auto& v:voices)v=Voice{};sustainPedal=false;monoHeld.fill(false);}
+ void allNotesOff(){for(auto& v:voices)if(v.active)v.off(false);sustainPedal=false;monoHeld.fill(false);}
  void sustain(bool down){
   if(sustainPedal==down)return;
   sustainPedal=down;
@@ -131,9 +133,15 @@ struct Synth{
  }
  void noteOn(int n,float vel){
   if(monoMode){
-   double previous=voices[0].active?voices[0].pitchHz:0;
+   if(n<0||n>=128)return;
+   monoHeld[(size_t)n]=true;monoVel[(size_t)n]=clamp(vel,0.f,1.f);
+   int lowest=-1;
+   for(int i=0;i<128;++i)if(monoHeld[(size_t)i]){lowest=i;break;}
+   if(lowest<0)return;
+   if(voices[0].active&&voices[0].note==lowest&&voices[0].held)return;
+   const double previous=voices[0].active?voices[0].pitchHz:0;
    for(size_t i=1;i<voices.size();++i)voices[i]=Voice{};
-   voices[0].on(n,clamp(vel,0,1),++age);
+   voices[0].on(lowest,monoVel[(size_t)lowest],++age);
    if(previous>0&&glideTime>.001f)voices[0].pitchHz=previous;
    return;
   }
@@ -144,7 +152,22 @@ struct Synth{
   if(!choice)for(auto& v:voices)if(!choice||v.age<choice->age)choice=&v;
   if(choice)choice->on(n,clamp(vel,0,1),++age);
  }
- void noteOff(int n){for(auto& v:voices)if(v.active&&v.note==n&&v.held)v.off(sustainPedal);}
+ void noteOff(int n){
+  if(monoMode&&n>=0&&n<128){
+   monoHeld[(size_t)n]=false;
+   int lowest=-1;
+   for(int i=0;i<128;++i)if(monoHeld[(size_t)i]){lowest=i;break;}
+   if(lowest>=0){
+    if(voices[0].note!=lowest){
+     const double previous=voices[0].pitchHz;
+     voices[0].on(lowest,monoVel[(size_t)lowest],++age);
+     if(previous>0&&glideTime>.001f)voices[0].pitchHz=previous;
+    }
+   }else if(voices[0].active)voices[0].off(sustainPedal);
+   return;
+  }
+  for(auto& v:voices)if(v.active&&v.note==n&&v.held)v.off(sustainPedal);
+ }
  float sample(float cutoff,float resonance,float attack,float decay,float sustain,float release,
      float detune,float pulseWidth=.5f,float waveMix=0.f,float filterAmount=0.f,
      float filterAttack=.02f,float filterDecay=.35f,float filterSustain=.35f,float sync=0.f,

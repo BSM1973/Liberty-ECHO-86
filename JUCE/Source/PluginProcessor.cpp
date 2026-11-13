@@ -151,7 +151,7 @@ public:
    const float fade=delay<=.001f?1.f:echo86::clamp((float)((lfoAge-delay)/.05),0.f,1.f);
    ex.lfoValue=lfo*fade;
    ex.lfoPitch=lfoPitch;
-   const float modCutoff=echo86::clamp(cutoff*std::pow(2.f,lfo*lfoDepth*2.f),60.f,16000.f);
+   const float modCutoff=echo86::clamp(cutoff*std::pow(2.f,ex.lfoValue*lfoDepth*2.f),60.f,16000.f);
    float x=synth.sample(modCutoff,res,a,d,sus,release,det,pw,mix,fe,fa,fd,fs,sync,ex);
    float left=x,right=x;
    effects.process(left,right,fx);

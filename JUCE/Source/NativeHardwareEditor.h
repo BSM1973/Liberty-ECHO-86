@@ -11,6 +11,9 @@
 #include <functional>
 
 class Echo86Editor final : public juce::AudioProcessorEditor, private juce::Timer {
+    static constexpr std::array<const char*,41> extendedIds={
+      "osc1Wave","osc2Wave","osc1Oct","osc1Semi","osc1Fine","osc2Oct","osc2Semi","osc2Fine","osc1Level","osc2Level","noiseLevel","noiseColour","keyTrack","velocityToFilter","filterDrive","masterLevel","lfoWave","lfoPitch","lfoDelay","lfoPwm1","lfoPwm2","envPitch2","crossMod","chorusEnabled","chorusWidth","monoMode","portamento","transpose","masterTune","velocityResponse","bendRange","wheelVibrato","wheelFilter","pressureFilter","vintageAge","voiceSpread","ampBreak","ampDecay2","filterBreak","filterDecay2","filterRelease"
+    };
     class HardwareLook final : public juce::LookAndFeel_V4 {
     public:
         void drawRotarySlider(juce::Graphics& g,int x,int y,int w,int h,float pos,
@@ -33,6 +36,18 @@ class Echo86Editor final : public juce::AudioProcessorEditor, private juce::Time
         }
         void drawLinearSlider(juce::Graphics& g,int x,int y,int w,int h,float sliderPos,
                                float,float,juce::Slider::SliderStyle style,juce::Slider&) override {
+            if(style==juce::Slider::LinearHorizontal) {
+                const float cy=y+h*.5f;
+                g.setColour(juce::Colour(0xff0d1e21));
+                g.fillRoundedRectangle(x+7,cy-3,w-14.f,6.f,3);
+                g.setColour(juce::Colour(0xff76938b));
+                g.drawLine(x+9,cy,x+w-9,cy,1.f);
+                g.setColour(juce::Colour(0xffe8dfb8));
+                g.fillRoundedRectangle(sliderPos-9,cy-9,18.f,18.f,2);
+                g.setColour(juce::Colour(0xff264148));
+                g.drawRoundedRectangle(sliderPos-9,cy-9,18.f,18.f,2,1.f);
+                return;
+            }
             if(style!=juce::Slider::LinearVertical)return;
             const float cx=x+w*.5f;
             g.setColour(juce::Colour(0xff07191a));
@@ -125,10 +140,10 @@ public:
         addKnob(0,1475,459,"PWM","lfoPwm2");
         addSwitch(0,830,556,115,35,"FREE","hardSync",0);
         addSwitch(0,956,556,115,35,"SYNC","hardSync",1);
-        addKnob(0,1180,550,"CROSS MOD","crossMod",82,100);
-        addKnob(0,1452,550,"ENV → PITCH","envPitch2",82,100);
-        addFader(0,108,765,"OSC 1","osc1Level");addFader(0,210,765,"OSC 2","osc2Level");
-        addFader(0,312,765,"NOISE","noiseLevel");addKnob(0,408,766,"COLOUR","noiseColour");
+        addHorizontal(0,1175,572,"CROSS MOD","crossMod",180);
+        addHorizontal(0,1435,572,"ENV → PITCH","envPitch2",180);
+        addFader(0,108,818,"OSC 1","osc1Level");addFader(0,210,818,"OSC 2","osc2Level");
+        addFader(0,312,818,"NOISE","noiseLevel");addKnob(0,408,766,"COLOUR","noiseColour");
         const int filterX[]={570,700,830,960,1090,1220,1350,1480};
         const char* filterNames[]={"CUTOFF","RESONANCE","ENV DEPTH","KEY TRACK",
             "VELOCITY","LFO DEPTH","AUDIO FM","DRIVE"};
@@ -142,8 +157,8 @@ public:
         const char* ampIds[]={"attack","decay","ampBreak","ampDecay2","sustain","release"};
         const char* filIds[]={"filterAttack","filterDecay","filterBreak","filterDecay2","filterSustain","filterRelease"};
         for(int i=0;i<6;++i){
-            addFader(1,faderX[i],427,envNames[i],ampIds[i]);
-            addFader(1,faderX[i],752,envNames[i],filIds[i]);
+            addFader(1,faderX[i],470,envNames[i],ampIds[i]);
+            addFader(1,faderX[i],787,envNames[i],filIds[i]);
         }
 
         // MODULATION — waveform, rate/depth, pitch and routing
@@ -167,16 +182,16 @@ public:
         const int perfX[]={143,302,461,620,779};
         const char* perfNames[]={"PORTAMENTO","TRANSPOSE","MASTER TUNE","VELOCITY","BEND RANGE"};
         const char* perfIds[]={"portamento","transpose","masterTune","velocityResponse","bendRange"};
-        for(int i=0;i<5;++i)addKnob(3,perfX[i],515,perfNames[i],perfIds[i]);
+        for(int i=0;i<5;++i)addKnob(3,perfX[i],544,perfNames[i],perfIds[i]);
         addKnob(3,195,717,"WHEEL VIBRATO","wheelVibrato");
         addKnob(3,461,717,"WHEEL → VCF","wheelFilter");
         addKnob(3,726,717,"PRESSURE → VCF","pressureFilter");
         addSwitch(3,925,373,123,54,"OFF","chorusEnabled",0);
         addSwitch(3,1060,373,123,54,"ON","chorusEnabled",1);
-        addKnob(3,1000,519,"RATE","chorusRate");
-        addKnob(3,1156,519,"DEPTH","chorusDepth");
-        addKnob(3,1312,519,"WIDTH","chorusWidth");
-        addKnob(3,1468,519,"MIX","chorusMix");
+        addKnob(3,1000,548,"RATE","chorusRate");
+        addKnob(3,1156,548,"DEPTH","chorusDepth");
+        addKnob(3,1312,548,"WIDTH","chorusWidth");
+        addKnob(3,1468,548,"MIX","chorusMix");
         addKnob(3,1122,791,"VINTAGE AGE","vintageAge");
         addKnob(3,1414,791,"VOICE SPREAD","voiceSpread");
         for(int i=0;i<4;++i)tabs[(size_t)i]->setClickingTogglesState(false);
@@ -328,7 +343,7 @@ public:
             if(c.page!=page&&c.page!=-1)continue;
             // The master label is at the left of the knob as in the source facade.
             if(c.page==-1)continue;
-            simpleText(g,c.name,c.x-90,c.y-(c.h==146?122:92),180,21,13,
+            simpleText(g,c.name,c.x-90,c.y-(c.h==188?122:c.h<60?52:75),180,21,13,
                          juce::Colour(0xffd6decb),juce::Justification::centred);
         }
         g.setColour(juce::Colour(0xff4b6163));
@@ -358,6 +373,10 @@ private:
     }
     void addFader(int pg,int x,int y,const juce::String& name,const char* id){
         addControl(pg,x,y,name,id,72,188,true);
+    }
+    void addHorizontal(int pg,int x,int y,const juce::String& name,const char* id,int width){
+        addControl(pg,x,y,name,id,width,47,false);
+        if(!knobs.empty())knobs.back().slider->setSliderStyle(juce::Slider::LinearHorizontal);
     }
     void addControl(int pg,int x,int y,const juce::String& name,const char* id,
                     int w,int h,bool fader){
@@ -418,6 +437,13 @@ private:
     void loadPreset(int index){
         if(index<0||index>=(int)echo86::factoryPresets.size())return;
         const auto& preset=echo86::factoryPresets[(size_t)index];
+        for(const auto* id:extendedIds){
+            if(auto* p=processor.state.getParameter(id)){
+                p->beginChangeGesture();
+                p->setValueNotifyingHost(p->getDefaultValue());
+                p->endChangeGesture();
+            }
+        }
         for(size_t i=0;i<echo86::parameterIds.size();++i)
             setParameter(echo86::parameterIds[i],preset.values[i]);
         selectedPreset=index;refreshSwitches();repaint();
@@ -460,6 +486,8 @@ private:
         auto* values=new juce::DynamicObject();
         for(auto* id:echo86::parameterIds)
             values->setProperty(id,processor.state.getRawParameterValue(id)->load());
+        for(auto* id:extendedIds)
+            values->setProperty(id,processor.state.getRawParameterValue(id)->load());
         root->setProperty("parameters",juce::var(values));
         return juce::var(root);
     }
@@ -501,8 +529,29 @@ private:
                      const float value=(float)(double)v;
                      if(value<p->convertFrom0to1(0.f)||value>p->convertFrom0to1(1.f))return;
                  }
+                 // Optional fields make original 24-parameter preset files compatible.
+                 for(auto* id:extendedIds){
+                     const auto v=values.getProperty(id,juce::var());
+                     if(v.isVoid())continue;
+                     const auto* p=safe->processor.state.getParameter(id);
+                     if(p==nullptr||(!v.isDouble()&&!v.isInt())||!std::isfinite((double)v))return;
+                     const float value=(float)(double)v;
+                     if(value<p->convertFrom0to1(0.f)||value>p->convertFrom0to1(1.f))return;
+                 }
                  for(auto* id:echo86::parameterIds)
                       safe->setParameter(id,(float)(double)values.getProperty(id,juce::var()));
+                 for(auto* id:extendedIds){
+                     const auto v=values.getProperty(id,juce::var());
+                     auto* p=safe->processor.state.getParameter(id);
+                     if(p!=nullptr){
+                        if(v.isVoid()){
+                           p->beginChangeGesture();
+                           p->setValueNotifyingHost(p->getDefaultValue());
+                           p->endChangeGesture();
+                        }
+                        else safe->setParameter(id,(float)(double)v);
+                     }
+                 }
                  safe->selectedPreset=-1;
                  safe->refreshSwitches();
                  safe->repaint();

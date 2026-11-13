@@ -83,181 +83,348 @@ private:
 };
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter(){return new Echo86Processor();}
 
-// Original Liberty visual language: typography, vector panels and custom controls.
-// No inherited PluginMaker.ai images, skin assets or facade arrangement.
+
+// Faithful JUCE integration of the four originally approved ECHO 86 panels.
+// The four original JPEGs are compiled as BinaryData resources. No generic
+// section-based substitute skin is used.
+#include <BinaryData.h>
+#include <vector>
+#include <memory>
+#include <cmath>
+
 class Echo86Editor final : public juce::AudioProcessorEditor {
+    struct InvisibleButton final : juce::Button {
+        InvisibleButton() : juce::Button("ECHO86 Hotspot") {}
+        void paintButton(juce::Graphics&, bool, bool) override {}
+    };
+
+    class VintageControls final : public juce::LookAndFeel_V4 {
+    public:
+        void drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h,
+                              float proportion, float start, float end, juce::Slider&) override {
+            const float cx = x + w * .5f;
+            const float cy = y + h * .50f;
+            const float radius = juce::jmin(w, h) * .375f;
+            const float angle = start + proportion * (end - start);
+            g.setColour(juce::Colour(0xff07161a));
+            g.fillEllipse(cx - radius - 3, cy - radius - 1, (radius + 3) * 2, (radius + 3) * 2);
+            g.setColour(juce::Colour(0xff527477));
+            g.drawEllipse(cx - radius - 1, cy - radius - 1, (radius + 1) * 2, (radius + 1) * 2, 2.0f);
+            g.setGradientFill(juce::ColourGradient(
+               juce::Colour(0xff344b4c),cx-radius,cy-radius,
+               juce::Colour(0xff0c2329),cx+radius,cy+radius,false));
+            g.fillEllipse(cx - radius + 3, cy - radius + 3, (radius - 3) * 2, (radius - 3) * 2);
+            g.setColour(juce::Colour(0x552f5557));
+            g.drawEllipse(cx-radius+7,cy-radius+7,(radius-7)*2,(radius-7)*2,1.2f);
+            const float s = std::sin(angle), c = std::cos(angle);
+            g.setColour(juce::Colour(0xfff3e3bf));
+            g.drawLine(cx + s*radius*.23f, cy - c*radius*.23f,
+                       cx + s*radius*.72f, cy - c*radius*.72f, 3.1f);
+        }
+
+        void drawLinearSlider(juce::Graphics& g, int x,int y,int w,int h,
+                              float sliderPos,float,float,juce::Slider::SliderStyle style,juce::Slider&) override {
+            if(style != juce::Slider::LinearVertical) return;
+            const float cx=x+w*.5f;
+            g.setColour(juce::Colour(0xff111f21));
+            g.fillRoundedRectangle(cx-6,y+2,12.f,(float)h-4,2.f);
+            g.setColour(juce::Colour(0xff46666b));
+            g.drawLine(cx,y+6,cx,y+h-6,2);
+            g.setColour(juce::Colour(0xffe8dfb8));
+            g.fillRoundedRectangle(cx-20,sliderPos-7,40,14,1.8f);
+            g.setColour(juce::Colour(0xff8f9a8e));
+            g.drawRoundedRectangle(cx-20,sliderPos-7,40,14,1.8f,1.3f);
+        }
+    };
+
+    struct Hotspot {
+        int page, x, y, w, h;
+        std::unique_ptr<InvisibleButton> button;
+    };
+
+    struct Control {
+        int page, cx, cy;
+        bool vertical;
+        std::unique_ptr<juce::Slider> slider;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
+    };
+
 public:
- explicit Echo86Editor(Echo86Processor& p):AudioProcessorEditor(p),processor(p){
-  for(const auto* category:{"TOUS","BASS","LEAD","PAD","KEYS","PLUCK","ARP","STRINGS","FX","INIT"})
-   categoryList.addItem(category,categoryList.getNumItems()+1);
-  categoryList.setSelectedId(1,juce::dontSendNotification);
-  categoryList.onChange=[this]{refreshFactoryList();};
-  addAndMakeVisible(categoryList);
-  refreshFactoryList();
-  presetList.onChange=[this]{
-   const int index=presetList.getSelectedId()-1;
-   if(index<0||index>=(int)echo86::factoryPresets.size())return;
-   const auto& preset=echo86::factoryPresets[(size_t)index];
-   for(size_t j=0;j<echo86::parameterIds.size();++j){
-    auto* param=processor.state.getParameter(echo86::parameterIds[j]);
-    if(param){
-     const float normalized=param->convertTo0to1(preset.values[j]);
-     param->beginChangeGesture();param->setValueNotifyingHost(normalized);param->endChangeGesture();
+    explicit Echo86Editor(Echo86Processor& processorToEdit)
+        : juce::AudioProcessorEditor(processorToEdit), processor(processorToEdit)
+    {
+        backgrounds = {
+          juce::ImageFileFormat::loadFrom(BinaryData::voice_jpg, BinaryData::voice_jpgSize),
+          juce::ImageFileFormat::loadFrom(BinaryData::envelopes_jpg, BinaryData::envelopes_jpgSize),
+          juce::ImageFileFormat::loadFrom(BinaryData::modulation_jpg, BinaryData::modulation_jpgSize),
+          juce::ImageFileFormat::loadFrom(BinaryData::performance_jpg, BinaryData::performance_jpgSize)
+        };
+
+        // Tabs match the four navigation buttons on the original facades.
+        makeButton(-1, 37,190,326,50,[this]{selectPage(0);});
+        makeButton(-1,375,190,326,50,[this]{selectPage(1);});
+        makeButton(-1,712,190,326,50,[this]{selectPage(2);});
+        makeButton(-1,1050,190,418,50,[this]{selectPage(3);});
+
+        // Original preset controls are fully interactive.
+        makeButton(-1,1252,37,215,51,[this]{showFactoryPresets();});
+        makeButton(-1,1251,94,64,39,[this]{stepPreset(-1);});
+        makeButton(-1,1318,94,82,39,[this]{applyPreset(0);});
+        makeButton(-1,1404,94,64,39,[this]{stepPreset(+1);});
+
+        // Voice / two-oscillator and four-pole filter page.
+        addKnob(0,526,439,"pulseWidth","OSC 1 / Pulse width");
+        addKnob(0,660,439,"waveMix","OSC 1 / Saw-Pulse mix");
+        addKnob(0,1117,439,"detune","OSC 2 / Fine detune");
+        addKnob(0,536,717,"cutoff","Filter cutoff");
+        addKnob(0,660,717,"resonance","Filter resonance");
+        addKnob(0,783,717,"filterEnvAmount","Filter envelope amount");
+        addKnob(0,1146,717,"lfoDepth","LFO depth");
+        addKnob(0,1389,717,"hardSync","Oscillator sync amount");
+
+        // Envelope page. The values that are currently connected to the sound
+        // engine have live sliders; all original graphics remain unchanged.
+        addFader(1,541,408,"attack","Amp attack");
+        addFader(1,708,408,"decay","Amp decay");
+        addFader(1,1209,408,"sustain","Amp sustain");
+        addFader(1,1377,408,"release","Amp release");
+        addFader(1,541,714,"filterAttack","Filter attack");
+        addFader(1,709,714,"filterDecay","Filter decay");
+        addFader(1,1209,714,"filterSustain","Filter sustain");
+
+        // Modulation, preserving the approved page layout.
+        addKnob(2,143,482,"lfoRate","LFO rate");
+        addKnob(2,310,482,"lfoDepth","LFO depth");
+        addKnob(2,863,402,"lfoDepth","LFO to filter");
+
+        // Vintage chorus and performance page.
+        addKnob(3,942,471,"chorusRate","Chorus rate");
+        addKnob(3,1082,471,"chorusDepth","Chorus depth");
+        addKnob(3,1379,471,"chorusMix","Chorus mix");
+
+        // Waveform selectors map the supported pulse/saw engine modes.
+        makeButton(0,57,311,106,51,[this]{setParameter("waveMix",0.0f);});
+        makeButton(0,282,311,107,51,[this]{setParameter("waveMix",1.0f);});
+        makeButton(0,780,521,79,32,[this]{setParameter("hardSync",0.0f);});
+        makeButton(0,864,521,81,32,[this]{setParameter("hardSync",1.0f);});
+        makeButton(3,870,352,114,39,[this]{setParameter("chorusMix",0.0f);});
+        makeButton(3,996,352,113,39,[this]{setParameter("chorusMix",0.35f);});
+
+        setResizable(true,true);
+        if (auto* constrainer=getConstrainer())
+            constrainer->setFixedAspectRatio(1600.0/1069.0);
+        setResizeLimits(1000,668,1600,1069);
+        // JUCE immediately calls resized(), so every control exists first.
+        setSize(1440,962);
+        selectPage(0);
     }
-   }
-   presetName.setText(juce::String::fromUTF8(preset.name),juce::dontSendNotification);
-  };
-  presetName.setText("MON SON",juce::dontSendNotification);
-  presetName.setSelectAllWhenFocused(true);
-  addAndMakeVisible(presetName);
-  saveButton.setButtonText("EXPORTER");
-  loadButton.setButtonText("IMPORTER");
-  saveButton.onClick=[this]{exportPreset();};
-  loadButton.onClick=[this]{importPreset();};
-  addAndMakeVisible(saveButton);
-  addAndMakeVisible(loadButton);
-  addAndMakeVisible(presetList);
-  const char* ids[]={"cutoff","resonance","attack","decay","sustain","release","detune","pulseWidth","waveMix","lfoRate","lfoDepth","filterEnvAmount","filterAttack","filterDecay","filterSustain","hardSync","chorusMix","chorusRate","chorusDepth","delayMix","delayTime","delayFeedback","reverbMix","reverbSize"};
-  const char* captions[]={"FRÉQUENCE","RÉSONANCE","ATTAQUE","DÉCLIN","MAINTIEN","RELÂCHEMENT","DÉTUNE","IMPULSION","FORME","VITESSE","PROFONDEUR","ENV FILTRE","ATTAQUE FILTRE","DÉCLIN FILTRE","MAINTIEN FILTRE","SYNC DCO","CHORUS","VITESSE","PROFONDEUR","DELAY","TEMPS","FEEDBACK","REVERB","TAILLE"};
-  for(int i=0;i<24;++i){
-   auto* knob=knobs.add(new juce::Slider());knob->setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-   knob->setTextBoxStyle(juce::Slider::TextBoxBelow,false,76,19);
-   knob->setColour(juce::Slider::rotarySliderFillColourId,juce::Colour(0xffdfaa62));
-   knob->setColour(juce::Slider::rotarySliderOutlineColourId,juce::Colour(0xff2c5263));
-   knob->setColour(juce::Slider::thumbColourId,juce::Colour(0xfff7ddad));
-   knob->setColour(juce::Slider::textBoxTextColourId,juce::Colours::white);
-   knob->setColour(juce::Slider::textBoxOutlineColourId,juce::Colours::transparentBlack);
-   addAndMakeVisible(knob);
-   auto* label=labels.add(new juce::Label());label->setText(juce::String::fromUTF8(captions[i]),juce::dontSendNotification);
-   label->setJustificationType(juce::Justification::centred);
-   label->setFont(juce::Font(juce::FontOptions(12.0f).withStyle("Bold")));
-   label->setColour(juce::Label::textColourId,juce::Colour(0xffb6d5db));addAndMakeVisible(label);
-   attachments.emplace_back(std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.state,ids[i],*knob));
-  }
-  // setSize() synchronously calls resized(): all 24 controls must exist first.
-  setSize(960,1025);
- }
- void paint(juce::Graphics& g)override{
-  auto r=getLocalBounds();g.fillAll(juce::Colour(0xff081b29));
-  g.setColour(juce::Colour(0xff15384b));g.fillRoundedRectangle(r.reduced(18).toFloat(),20);
-  g.setColour(juce::Colour(0xffe7b16d));g.setFont(juce::Font(juce::FontOptions(39.0f).withStyle("Bold")));
-  g.drawText("ECHO 86",40,28,400,55,juce::Justification::centredLeft);
-  g.setColour(juce::Colour(0xffaac6cc));g.setFont(juce::Font(juce::FontOptions(13.0f)));
-  g.drawText("LIBERTY MUSIC SOFTWARE  /  ANALOG POLYSYNTH",42,80,550,24,juce::Justification::centredLeft);
-  g.setColour(juce::Colour(0xff284f60));g.drawLine(40,118,920,118,1.5f);
-  auto panel=[&](int x,int y,int w,int h,const juce::String& title){
-   g.setColour(juce::Colour(0xff0d2838));g.fillRoundedRectangle((float)x,(float)y,(float)w,(float)h,13);
-   g.setColour(juce::Colour(0xff31576a));g.drawRoundedRectangle((float)x,(float)y,(float)w,(float)h,13,1);
-   g.setColour(juce::Colour(0xffe7b16d));g.setFont(juce::Font(juce::FontOptions(14.0f).withStyle("Bold")));
-   g.drawText(title,x+16,y+11,w-32,20,juce::Justification::centredLeft);
-  };
-  panel(36,140,435,182,"01  /  OSCILLATEURS");
-  panel(489,140,435,182,"02  /  FILTRE");
-  panel(36,338,578,182,"03  /  ENVELOPPE");
-  panel(632,338,292,182,"04  /  MODULATION");
-  panel(36,535,888,162,"05  /  ENVELOPPE FILTRE ET SYNC");
-  panel(36,712,888,163,"06  /  EFFETS STÉRÉO");
-  panel(36,885,888,115,"07  /  BIBLIOTHÈQUE");
-  g.setColour(juce::Colour(0xff9ab4bc));g.setFont(juce::Font(juce::FontOptions(11.0f)));
-  g.drawText("16 VOIX  •  2 DCO  •  MIDI",690,75,225,25,juce::Justification::centredRight);
-  g.drawText("ECHO 86  /  JUCE EDITION  /  PROTOTYPE",42,1004,870,16,juce::Justification::centredRight);
- }
- void resized()override{
-  // JUCE/hosts may request an early layout while the editor is still being built.
-  if(knobs.size()!=24 || labels.size()!=24) return;
-  categoryList.setBounds(210,892,154,26);
-  presetList.setBounds(372,892,523,26);
-  presetName.setBounds(210,944,325,28);
-  saveButton.setBounds(550,944,162,28);
-  loadButton.setBounds(727,944,168,28);
-  const juce::Rectangle<int> boxes[]={
-   {75,194,105,110},{205,194,105,110},{335,194,105,110},
-   {555,194,125,110},{718,194,125,110},
-   {60,390,112,110},{198,390,112,110},{336,390,112,110},{474,390,112,110},
-   {657,390,112,110},{790,390,112,110},
-   {60,577,135,108},{228,577,135,108},{396,577,135,108},{564,577,135,108},{732,577,135,108},
-   {47,753,101,106},{153,753,101,106},{259,753,101,106},{365,753,101,106},
-   {471,753,101,106},{577,753,101,106},{683,753,101,106},{789,753,101,106}
-  };
-  // Oscillators, filter, amplitude envelope, LFO.
-  const int mapped[]={6,7,8,0,1,2,3,4,5,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23};
-  for(int i=0;i<24;++i){const auto b=boxes[i];knobs[mapped[i]]->setBounds(b.getX(),b.getY()+20,b.getWidth(),b.getHeight()-18);labels[mapped[i]]->setBounds(b.getX()-10,b.getY(),b.getWidth()+20,19);}
- }
+
+    ~Echo86Editor() override {
+        for(auto& control:controls)
+            control.slider->setLookAndFeel(nullptr);
+    }
+
+    void paint(juce::Graphics& g) override {
+        if(backgrounds[(size_t)page].isValid()) {
+            g.drawImageWithin(backgrounds[(size_t)page], 0,0,getWidth(),getHeight(),
+                              juce::RectanglePlacement::stretchToFit);
+        } else {
+            g.fillAll(juce::Colour(0xff212c2d));
+        }
+        // Only the original amber LCD name changes dynamically.
+        g.saveState();
+        g.addTransform(juce::AffineTransform::scale(
+            (float)getWidth()/1600.f,(float)getHeight()/1069.f));
+        if(currentPreset>=0) {
+            g.setColour(juce::Colour(0xffc99743));
+            g.fillRect(671,82,464,54);
+            g.setColour(juce::Colour(0xff30271d));
+            g.setFont(juce::Font(juce::FontOptions(28.0f).withStyle("Bold")));
+            g.drawText(juce::String::fromUTF8(echo86::factoryPresets[(size_t)currentPreset].name),
+                       679,86,449,34,juce::Justification::centredLeft,true);
+            g.setFont(juce::Font(juce::FontOptions(12.0f)));
+            g.drawText("PROGRAM "+juce::String(currentPreset+1).paddedLeft('0',3),681,118,300,16,
+                       juce::Justification::centredLeft);
+        }
+        g.restoreState();
+    }
+
+    void resized() override {
+        if(hotspots.empty() || controls.empty()) return;
+        const float sx=(float)getWidth()/1600.f,sy=(float)getHeight()/1069.f;
+        for(auto& h:hotspots) {
+            h.button->setBounds(juce::roundToInt(h.x*sx),juce::roundToInt(h.y*sy),
+                                juce::roundToInt(h.w*sx),juce::roundToInt(h.h*sy));
+        }
+        for(auto& c:controls) {
+            if(c.vertical) {
+                c.slider->setBounds(juce::roundToInt((c.cx-39)*sx),
+                                    juce::roundToInt((c.cy-66)*sy),
+                                    juce::roundToInt(78*sx),juce::roundToInt(167*sy));
+            } else {
+                c.slider->setBounds(juce::roundToInt((c.cx-45)*sx),
+                                    juce::roundToInt((c.cy-46)*sy),
+                                    juce::roundToInt(90*sx),juce::roundToInt(116*sy));
+            }
+        }
+    }
+
 private:
- void refreshFactoryList(){
-  const juce::String selected=categoryList.getText();
-  presetList.clear(juce::dontSendNotification);
-  for(size_t i=0;i<echo86::factoryPresets.size();++i){
-   const auto name=juce::String::fromUTF8(echo86::factoryPresets[i].name);
-   if(selected=="TOUS"||name.startsWithIgnoreCase(selected+" ")||name.startsWithIgnoreCase(selected+" •"))
-    presetList.addItem(name,(int)i+1);
-  }
-  presetList.setTextWhenNothingSelected("100 SONS D'USINE • CHOISIR UN PRESET");
- }
- juce::var currentPreset()const{
-  auto* obj=new juce::DynamicObject();
-  obj->setProperty("format","ECHO86-PRESET");
-  obj->setProperty("version",1);
-  obj->setProperty("name",presetName.getText());
-  auto* values=new juce::DynamicObject();
-  for(const char* id:echo86::parameterIds)
-   values->setProperty(id,processor.state.getRawParameterValue(id)->load());
-  obj->setProperty("parameters",juce::var(values));
-  return juce::var(obj);
- }
- void exportPreset(){
-  auto suggested=juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
-     .getChildFile(juce::File::createLegalFileName(presetName.getText())+".echo86");
-  fileChooser=std::make_unique<juce::FileChooser>("Exporter un son ECHO 86",suggested,"*.echo86");
-  fileChooser->launchAsync(juce::FileBrowserComponent::saveMode|juce::FileBrowserComponent::canSelectFiles|
-     juce::FileBrowserComponent::warnAboutOverwriting,[this](const juce::FileChooser& chooser){
-    const auto file=chooser.getResult();
-    if(file==juce::File{})return;
-    const auto json=juce::JSON::toString(currentPreset(),true);
-    if(!file.replaceWithText(json))juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"ECHO 86","Impossible d'enregistrer le preset.");
-  });
- }
- void importPreset(){
-  fileChooser=std::make_unique<juce::FileChooser>("Importer un son ECHO 86",juce::File{},"*.echo86");
-  fileChooser->launchAsync(juce::FileBrowserComponent::openMode|juce::FileBrowserComponent::canSelectFiles,
-   [this](const juce::FileChooser& chooser){
-    const auto file=chooser.getResult();
-    if(file==juce::File{})return;
-    if(file.getSize()>65536){juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"ECHO 86","Preset trop volumineux.");return;}
-    const auto data=juce::JSON::parse(file.loadFileAsString());
-    if(!data.isObject()||data.getProperty("format","").toString()!="ECHO86-PRESET"||
-       (int)data.getProperty("version",0)!=1||!data.getProperty("parameters",juce::var()).isObject()){
-     juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"ECHO 86","Fichier preset invalide.");return;
+    void makeButton(int pg,int x,int y,int w,int h,std::function<void()> click) {
+        Hotspot s{pg,x,y,w,h,std::make_unique<InvisibleButton>()};
+        s.button->onClick=std::move(click);
+        addAndMakeVisible(*s.button);
+        hotspots.emplace_back(std::move(s));
     }
-    const auto values=data.getProperty("parameters",juce::var());
-    // Validate every value before modifying any parameter.
-    for(const char* id:echo86::parameterIds){
-     auto* param=processor.state.getParameter(id);
-     const auto v=values.getProperty(id,juce::var());
-     if(!param||(!v.isDouble()&&!v.isInt())||!std::isfinite((double)v)){
-      juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"ECHO 86","Paramètre manquant ou invalide.");return;
-     }
-     const float x=(float)(double)v;
-     if(x<param->convertFrom0to1(0.f)||x>param->convertFrom0to1(1.f)){
-      juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"ECHO 86","Valeur hors limites.");return;
-     }
+
+    void addKnob(int pg,int cx,int cy,const char* id,const char* tooltip) {
+        addControl(pg,cx,cy,id,tooltip,false);
     }
-    for(const char* id:echo86::parameterIds){
-     auto* param=processor.state.getParameter(id);
-     const float normalized=param->convertTo0to1((float)(double)values.getProperty(id,juce::var()));
-     param->beginChangeGesture();param->setValueNotifyingHost(normalized);param->endChangeGesture();
+    void addFader(int pg,int cx,int cy,const char* id,const char* tooltip) {
+        addControl(pg,cx,cy,id,tooltip,true);
     }
-    presetList.setSelectedId(0,juce::dontSendNotification);
-    presetName.setText(data.getProperty("name","MON SON").toString().substring(0,80),juce::dontSendNotification);
-   });
- }
- Echo86Processor& processor;
- juce::ComboBox categoryList,presetList;
- juce::TextEditor presetName;
- juce::TextButton saveButton,loadButton;
- std::unique_ptr<juce::FileChooser> fileChooser;
- juce::OwnedArray<juce::Slider> knobs;
- juce::OwnedArray<juce::Label> labels;
- std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> attachments;
+    void addControl(int pg,int cx,int cy,const char* id,const char* tooltip,bool vertical) {
+        Control c{pg,cx,cy,vertical,std::make_unique<juce::Slider>(),nullptr};
+        auto& s=*c.slider;
+        s.setSliderStyle(vertical?juce::Slider::LinearVertical:
+                                 juce::Slider::RotaryHorizontalVerticalDrag);
+        s.setRotaryParameters(juce::MathConstants<float>::pi*1.22f,
+                             juce::MathConstants<float>::pi*2.78f,true);
+        s.setTextBoxStyle(juce::Slider::TextBoxBelow,false,76,19);
+        s.setColour(juce::Slider::textBoxBackgroundColourId,juce::Colour(0xff141f21));
+        s.setColour(juce::Slider::textBoxTextColourId,juce::Colour(0xffdae3da));
+        s.setColour(juce::Slider::textBoxOutlineColourId,juce::Colour(0xff3b4b4d));
+        s.setTooltip(tooltip);
+        s.setLookAndFeel(&vintageLook);
+        c.attachment=std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.state,id,s);
+        addAndMakeVisible(s);
+        controls.emplace_back(std::move(c));
+    }
+
+    void selectPage(int target) {
+        page=juce::jlimit(0,3,target);
+        for(auto& c:controls)c.slider->setVisible(c.page==page);
+        for(auto& h:hotspots)h.button->setVisible(h.page<0||h.page==page);
+        repaint();
+    }
+
+    void setParameter(const char* id,float value) {
+        if(auto* parameter=processor.state.getParameter(id)){
+            parameter->beginChangeGesture();
+            parameter->setValueNotifyingHost(parameter->convertTo0to1(value));
+            parameter->endChangeGesture();
+        }
+    }
+
+    void applyPreset(int index) {
+        if(index<0||index>=(int)echo86::factoryPresets.size())return;
+        const auto& preset=echo86::factoryPresets[(size_t)index];
+        for(size_t i=0;i<echo86::parameterIds.size();++i)
+            setParameter(echo86::parameterIds[i],preset.values[i]);
+        currentPreset=index;
+        repaint();
+    }
+
+    void stepPreset(int delta) {
+        const int n=(int)echo86::factoryPresets.size();
+        applyPreset((currentPreset+n+delta)%n);
+    }
+
+    void showFactoryPresets() {
+        juce::PopupMenu menu;
+        const char* families[]={"INIT","BASS","LEAD","PAD","KEYS","PLUCK","ARP","STRINGS","FX"};
+        for(auto* family:families){
+            juce::PopupMenu subgroup;
+            const juce::String prefix=juce::String(family)+" ";
+            for(int i=0;i<(int)echo86::factoryPresets.size();++i) {
+                const auto name=juce::String::fromUTF8(echo86::factoryPresets[(size_t)i].name);
+                if(name.startsWithIgnoreCase(prefix)){
+                    subgroup.addItem(i+1,name,i!=currentPreset);
+                }
+            }
+            if(subgroup.getNumItems()>0)menu.addSubMenu(family,subgroup);
+        }
+        menu.addSeparator();
+        menu.addItem(1001,"IMPORT USER PRESET...");
+        menu.addItem(1002,"EXPORT USER PRESET...");
+        juce::Component::SafePointer<Echo86Editor> safe(this);
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
+           [safe](int result) {
+              if(safe==nullptr)return;
+              if(result>=1&&result<=100)safe->applyPreset(result-1);
+              else if(result==1001)safe->importPreset();
+              else if(result==1002)safe->exportPreset();
+           });
+    }
+
+    juce::var serializePreset() const {
+        auto* root=new juce::DynamicObject();
+        root->setProperty("format","ECHO86-PRESET");
+        root->setProperty("version",1);
+        root->setProperty("name",currentPreset<0?"Init":
+                          juce::String::fromUTF8(echo86::factoryPresets[(size_t)currentPreset].name));
+        auto* values=new juce::DynamicObject();
+        for(const char* id:echo86::parameterIds)
+            values->setProperty(id,processor.state.getRawParameterValue(id)->load());
+        root->setProperty("parameters",juce::var(values));
+        return juce::var(root);
+    }
+
+    void exportPreset() {
+        const auto suggested=juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+                   .getChildFile("ECHO86-Sound.echo86");
+        fileChooser=std::make_unique<juce::FileChooser>("Export ECHO 86",suggested,"*.echo86");
+        juce::Component::SafePointer<Echo86Editor> safe(this);
+        fileChooser->launchAsync(juce::FileBrowserComponent::saveMode|
+                      juce::FileBrowserComponent::canSelectFiles|
+                      juce::FileBrowserComponent::warnAboutOverwriting,
+          [safe](const juce::FileChooser& fc){
+            if(safe==nullptr)return;
+            const auto file=fc.getResult();
+            if(file==juce::File{})return;
+            if(!file.replaceWithText(juce::JSON::toString(safe->serializePreset(),true)))
+                juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                                                       "ECHO 86","Cannot save preset");
+          });
+    }
+
+    void importPreset() {
+        fileChooser=std::make_unique<juce::FileChooser>("Import ECHO 86",juce::File{},"*.echo86");
+        juce::Component::SafePointer<Echo86Editor> safe(this);
+        fileChooser->launchAsync(juce::FileBrowserComponent::openMode|
+                   juce::FileBrowserComponent::canSelectFiles,
+          [safe](const juce::FileChooser& fc){
+            if(safe==nullptr)return;
+            const auto file=fc.getResult();
+            if(file==juce::File{})return;
+            if(file.getSize()>65536)return;
+            const auto data=juce::JSON::parse(file.loadFileAsString());
+            if(!data.isObject()||data.getProperty("format","").toString()!="ECHO86-PRESET"||
+               (int)data.getProperty("version",0)!=1||
+               !data.getProperty("parameters",juce::var()).isObject())return;
+            const auto values=data.getProperty("parameters",juce::var());
+            // Validate all values before applying any parameter.
+            for(const char* id:echo86::parameterIds){
+                auto* p=safe->processor.state.getParameter(id);
+                const auto v=values.getProperty(id,juce::var());
+                if(p==nullptr||(!v.isDouble()&&!v.isInt())||!std::isfinite((double)v))return;
+                const float value=(float)(double)v;
+                if(value<p->convertFrom0to1(0.f)||value>p->convertFrom0to1(1.f))return;
+            }
+            for(const char* id:echo86::parameterIds)
+                safe->setParameter(id,(float)(double)values.getProperty(id,juce::var()));
+            safe->currentPreset=-1;
+            safe->repaint();
+          });
+    }
+
+    Echo86Processor& processor;
+    VintageControls vintageLook;
+    std::array<juce::Image,4> backgrounds;
+    std::vector<Hotspot> hotspots;
+    std::vector<Control> controls;
+    std::unique_ptr<juce::FileChooser> fileChooser;
+    int page=0;
+    int currentPreset=-1;
 };
 juce::AudioProcessorEditor* Echo86Processor::createEditor(){return new Echo86Editor(*this);}

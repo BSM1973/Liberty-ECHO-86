@@ -10,6 +10,7 @@ if(APPLE)
 else()
  set(ECHO86_FORMATS VST3 Standalone)
 endif()
+juce_add_binary_data(ECHO86Artwork SOURCES Artwork/voice.jpg Artwork/envelopes.jpg Artwork/modulation.jpg Artwork/performance.jpg)
 juce_add_plugin(ECHO86 COMPANY_NAME "Liberty Music Software" BUNDLE_ID "com.libertymusicsoftware.echo86"
  PLUGIN_MANUFACTURER_CODE LbMS PLUGIN_CODE Ec86
  FORMATS ${ECHO86_FORMATS} PRODUCT_NAME "ECHO 86"
@@ -17,7 +18,7 @@ juce_add_plugin(ECHO86 COMPANY_NAME "Liberty Music Software" BUNDLE_ID "com.libe
 juce_generate_juce_header(ECHO86)
 target_sources(ECHO86 PRIVATE Source/PluginProcessor.cpp)
 target_compile_definitions(ECHO86 PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
-target_link_libraries(ECHO86 PRIVATE juce::juce_audio_utils juce::juce_audio_processors juce::juce_dsp)
+target_link_libraries(ECHO86 PRIVATE ECHO86Artwork juce::juce_audio_utils juce::juce_audio_processors juce::juce_dsp)
 
 # Native unit tests do not require JUCE modules; they exercise the same DSP headers.
 include(CTest)

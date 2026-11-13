@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(ECHO86 VERSION 0.1.0 LANGUAGES CXX)
+project(ECHO86 VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 if(NOT DEFINED JUCE_DIR)
  message(FATAL_ERROR "Indiquer -DJUCE_DIR=/chemin/vers/JUCE (JUCE 8 requis).")

@@ -10,10 +10,11 @@
 #include <cmath>
 #include <functional>
 #include "PresetBrowser.h"
+#include "LfoWaveform.h"
 
 class Echo86Editor final : public juce::AudioProcessorEditor, private juce::Timer {
-    static constexpr std::array<const char*,41> extendedIds={
-      "osc1Wave","osc2Wave","osc1Oct","osc1Semi","osc1Fine","osc2Oct","osc2Semi","osc2Fine","osc1Level","osc2Level","noiseLevel","noiseColour","keyTrack","velocityToFilter","filterDrive","masterLevel","lfoWave","lfoPitch","lfoDelay","lfoPwm1","lfoPwm2","envPitch2","crossMod","chorusEnabled","chorusWidth","monoMode","portamento","transpose","masterTune","velocityResponse","bendRange","wheelVibrato","wheelFilter","pressureFilter","vintageAge","voiceSpread","ampBreak","ampDecay2","filterBreak","filterDecay2","filterRelease"
+    static constexpr std::array<const char*,42> extendedIds={
+      "osc1Wave","osc2Wave","osc1Oct","osc1Semi","osc1Fine","osc2Oct","osc2Semi","osc2Fine","osc1Level","osc2Level","noiseLevel","noiseColour","keyTrack","velocityToFilter","filterDrive","masterLevel","lfoWave","lfoPitch","lfoDelay","lfoPwm1","lfoPwm2","envPitch2","crossMod","chorusEnabled","chorusWidth","monoMode","portamento","transpose","masterTune","velocityResponse","bendRange","wheelVibrato","wheelFilter","pressureFilter","vintageAge","voiceSpread","ampBreak","ampDecay2","filterBreak","filterDecay2","filterRelease","lfoFilterDepth"
     };
     class HardwareLook final : public juce::LookAndFeel_V4 {
     public:
@@ -106,6 +107,7 @@ class Echo86Editor final : public juce::AudioProcessorEditor, private juce::Time
     std::unique_ptr<Echo86PresetBrowser> presetBrowser;
     int page=0, selectedPreset=-1;
     bool prepared=false;
+    double lfoPreviewPhase=0.0,lastPreviewTimeMs=0.0;
     static constexpr int W=1600,H=1069;
 public:
     explicit Echo86Editor(Echo86Processor& p):juce::AudioProcessorEditor(p),processor(p) {
@@ -148,9 +150,9 @@ public:
         addFader(0,312,818,"NOISE","noiseLevel");addKnob(0,408,766,u8"COULEUR","noiseColour");
         const int filterX[]={570,700,830,960,1090,1220,1350,1480};
         const char* filterNames[]={u8"FRÉQUENCE",u8"RÉSONANCE",u8"PROF. ENV.",u8"SUIVI CLAVIER",
-            u8"VÉLOCITÉ",u8"PROF. LFO",u8"FM AUDIO","DRIVE"};
+            u8"VÉLOCITÉ",u8"LFO -> FILTRE",u8"FM AUDIO","DRIVE"};
         const char* filterIds[]={"cutoff","resonance","filterEnvAmount","keyTrack",
-            "velocityToFilter","lfoDepth","crossMod","filterDrive"};
+            "velocityToFilter","lfoFilterDepth","crossMod","filterDrive"};
         for(int i=0;i<8;++i)addKnob(0,filterX[i],774,filterNames[i],filterIds[i]);
 
         // ENVELOPES — the original two six-stage envelopes, not bitmap faders
@@ -170,7 +172,7 @@ public:
         addKnob(2,333,521,u8"PROFONDEUR","lfoDepth");
         addKnob(2,513,521,u8"HAUTEUR","lfoPitch");
         addKnob(2,693,521,u8"RETARD","lfoDelay");
-        addKnob(2,918,423,u8"LFO -> FILTRE","lfoDepth");
+        addKnob(2,918,423,u8"LFO -> FILTRE","lfoFilterDepth");
         addKnob(2,1095,423,"LFO -> PWM 1","lfoPwm1");
         addKnob(2,1272,423,"LFO -> PWM 2","lfoPwm2");
         addKnob(2,1448,423,"ENV. 2 -> OSC. 2","envPitch2");
@@ -416,13 +418,46 @@ public:
             auto r=rect(67,647,694,140);
             g.setColour(juce::Colour(0xff121e21));g.fillRoundedRectangle(r.toFloat(),3);
             g.setColour(juce::Colour(0xff4f6868));g.drawRoundedRectangle(r.toFloat(),3,1);
-            juce::Path sine;
-            for(int i=0;i<620;++i){
-                const auto x=(90+i)*scaleX();
-                const auto y=(715-43*std::sin(i*.0314f))*scaleY();
-                if(i==0)sine.startNewSubPath(x,y);else sine.lineTo(x,y);
+            const auto getLfo=[this](const char* id,float fallback){
+                if(const auto* p=processor.state.getRawParameterValue(id))
+                    return std::isfinite(p->load())?p->load():fallback;
+                return fallback;
+            };
+            const int wave=juce::jlimit(0,3,juce::roundToInt(getLfo("lfoWave",0.f)));
+            const float rate=juce::jlimit(.05f,16.f,getLfo("lfoRate",2.f));
+            const float depth=juce::jlimit(0.f,1.f,getLfo("lfoDepth",0.f));
+            const float cycles=juce::jlimit(.85f,6.f,1.f+.95f*std::sqrt(rate));
+            const float left=90.f*scaleX(),right=738.f*scaleX();
+            const float mid=724.f*scaleY(),amp=39.f*scaleY();
+            g.setColour(juce::Colour(0x526a8a87));
+            g.drawLine(left,mid,right,mid,1.f);
+            juce::Path silhouette,live;
+            for(int i=0;i<=480;++i){
+                const float t=(float)i/480.f;
+                const double phase=lfoPreviewPhase+echo86::lfoTwoPi*cycles*t;
+                const float sample=echo86::lfoPreviewSample(wave,phase);
+                const float xx=left+(right-left)*t;
+                if(i==0){
+                    silhouette.startNewSubPath(xx,mid-sample*amp*.35f);
+                    live.startNewSubPath(xx,mid-sample*amp*depth);
+                }else{
+                    silhouette.lineTo(xx,mid-sample*amp*.35f);
+                    live.lineTo(xx,mid-sample*amp*depth);
+                }
             }
-            g.setColour(juce::Colour(0xffd7bd74));g.strokePath(sine,juce::PathStrokeType(2*scaleY()));
+            g.saveState();
+            g.reduceClipRegion(rect(84,679,666,98));
+            g.setColour(juce::Colour(0x665c8386));
+            g.strokePath(silhouette,juce::PathStrokeType(1.3f*scaleY()));
+            g.setColour(juce::Colour(0xffe6c77d));
+            g.strokePath(live,juce::PathStrokeType(2.4f*scaleY()));
+            g.restoreState();
+            const char* waveNames[]={"SINUS","TRIANGLE","CARRÉ","S & H"};
+            simpleText(g,juce::String::fromUTF8(waveNames[wave])+
+                       " / "+juce::String(rate,2)+" Hz / "+
+                       juce::String(juce::roundToInt(depth*100.f))+" %",
+                       438,654,297,21,12,juce::Colour(0xffdbcaa1),
+                       juce::Justification::centredRight);
             simpleText(g,u8"FORME D'ONDE LFO",82,656,340,22,13,juce::Colour(0xff819b9c));
             break;
           }
@@ -489,6 +524,7 @@ private:
         c.slider->setColour(juce::Slider::textBoxBackgroundColourId,juce::Colour(0xff101b1e));
         c.slider->setColour(juce::Slider::textBoxOutlineColourId,juce::Colour(0xff495c5b));
         c.slider->setTooltip(c.name);
+        if(pg==2)c.slider->onValueChange=[this]{if(page==2)repaint(rect(67,647,694,140));};
         if(pg==1)c.slider->onValueChange=[this]{
             // Immediate preview feedback during a fader drag.
             if(page==1){
@@ -511,6 +547,7 @@ private:
         s.button->onClick=[this,parameter=juce::String(id),value]{
             setParameter(parameter,value);
             refreshSwitches();
+            if(page==2)repaint(rect(67,647,694,140));
         };
         addAndMakeVisible(*s.button);
         switches.push_back(std::move(s));
@@ -527,6 +564,8 @@ private:
         for(auto& c:knobs)c.slider->setVisible(c.page==page||c.page==-1);
         for(auto& s:switches)s.button->setVisible(s.page==page);
         for(int i=0;i<4;++i)tabs[(size_t)i]->setToggleState(i==page,juce::dontSendNotification);
+        lastPreviewTimeMs=juce::Time::getMillisecondCounterHiRes();
+        startTimerHz(page==2?30:page==1?15:8);
         repaint();
     }
     void refreshSwitches(){
@@ -538,6 +577,17 @@ private:
     }
     void timerCallback()override{
         refreshSwitches();
+        if(page==2){
+            const double now=juce::Time::getMillisecondCounterHiRes();
+            const double dt=juce::jlimit(0.0,.12,(now-lastPreviewTimeMs)/1000.0);
+            lastPreviewTimeMs=now;
+            const auto* raw=processor.state.getRawParameterValue("lfoRate");
+            const double rate=raw?juce::jlimit(.05,16.0,(double)raw->load()):2.0;
+            lfoPreviewPhase+=echo86::lfoTwoPi*rate*dt;
+            if(lfoPreviewPhase>echo86::lfoTwoPi*2048.0)
+                lfoPreviewPhase=std::fmod(lfoPreviewPhase,echo86::lfoTwoPi*2048.0);
+            repaint(rect(67,647,694,140));
+        }
         if(page==1){
             // Host automation and preset recall update both envelope plots.
             repaint(rect(60,341,400,205));

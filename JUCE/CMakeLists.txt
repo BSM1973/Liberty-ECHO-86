@@ -22,7 +22,7 @@ target_link_libraries(ECHO86 PRIVATE juce::juce_audio_utils juce::juce_audio_pro
 # Native unit tests do not require JUCE modules; they exercise the same DSP headers.
 include(CTest)
 if(BUILD_TESTING)
- foreach(test_name IN ITEMS test_core test_midi_v43 test_polyphony16_v44 test_advanced_v45 test_effects_v46 test_presets_v47 test_100_presets_v48 test_native_ui_dsp test_lfo_waveform)
+ foreach(test_name IN ITEMS test_core test_midi_v43 test_polyphony16_v44 test_advanced_v45 test_effects_v46 test_presets_v47 test_100_presets_v48 test_native_ui_dsp test_lfo_waveform test_ui_localization)
   add_executable(${test_name} Source/${test_name}.cpp)
   target_compile_features(${test_name} PRIVATE cxx_std_17)
   add_test(NAME ${test_name} COMMAND ${test_name})

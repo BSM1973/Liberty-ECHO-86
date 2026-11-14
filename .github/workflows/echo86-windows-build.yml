@@ -1,0 +1,106 @@
+name: ECHO 86 Windows VST3 x64
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "JUCE/**"
+      - ".github/workflows/echo86-windows-build.yml"
+
+jobs:
+  windows:
+    name: Windows x64 VST3 and Standalone
+    runs-on: windows-2022
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout ECHO 86
+        uses: actions/checkout@v4
+
+      - name: Checkout same JUCE 8 version as macOS
+        uses: actions/checkout@v4
+        with:
+          repository: juce-framework/JUCE
+          ref: 8.0.10
+          path: .juce-sdk
+
+      - name: Configure Windows x64
+        shell: pwsh
+        run: |
+          cmake -S JUCE -B build -G "Visual Studio 17 2022" -A x64 "-DJUCE_DIR=$env:GITHUB_WORKSPACE/.juce-sdk" -DBUILD_TESTING=ON
+          if ($LASTEXITCODE -ne 0) { throw "Windows CMake configuration failed" }
+
+      - name: Build VST3, Standalone and DSP tests
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Windows build failed" }
+
+      - name: Verify DSP and preset tests
+        shell: pwsh
+        run: |
+          ctest --test-dir build -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "Windows DSP/preset tests failed" }
+
+      - name: Package and verify Windows VST3
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $vst3 = Get-ChildItem -LiteralPath "$env:GITHUB_WORKSPACE/build" -Recurse -Directory -Filter "*.vst3" |
+            Where-Object { $_.Name -eq "ECHO 86.vst3" } | Select-Object -First 1
+          if ($null -eq $vst3) { throw "ECHO 86.vst3 bundle not found" }
+
+          $binary = Get-ChildItem -LiteralPath $vst3.FullName -Recurse -File -Filter "*.vst3" |
+            Where-Object { $_.DirectoryName -match 'x86_64-win' } | Select-Object -First 1
+          if ($null -eq $binary -or $binary.Length -le 0) {
+            throw "Windows x64 VST3 binary missing in $($vst3.FullName)"
+          }
+
+          $stage = Join-Path $env:RUNNER_TEMP "ECHO86-Windows-x64"
+          New-Item -ItemType Directory -Force -Path (Join-Path $stage "VST3") | Out-Null
+          Copy-Item -LiteralPath $vst3.FullName -Destination (Join-Path $stage "VST3/ECHO 86.vst3") -Recurse -Force
+
+          $exe = Get-ChildItem -LiteralPath "$env:GITHUB_WORKSPACE/build" -Recurse -File -Filter "ECHO 86.exe" |
+            Where-Object { $_.FullName -match 'Standalone' } | Select-Object -First 1
+          if ($null -ne $exe) {
+            New-Item -ItemType Directory -Force -Path (Join-Path $stage "Standalone") | Out-Null
+            Copy-Item -LiteralPath $exe.FullName -Destination (Join-Path $stage "Standalone/ECHO 86.exe") -Force
+          }
+
+          @"
+          ECHO 86 - Windows 64-bit
+          =========================
+          VST3 INSTALLATION
+          Copy the entire VST3\ECHO 86.vst3 folder to:
+          C:\Program Files\Common Files\VST3\
+          Administrator rights may be required.
+
+          Restart your DAW and rescan VST3 plugins.
+          Supported DAWs include Ableton Live, Cubase, Studio One, REAPER, etc.
+          Use only 64-bit Windows hosts.
+
+          The optional Standalone\ECHO 86.exe may be launched without VST3 installation.
+          This is an unsigned test build. The plugin audio engine, presets and GUI
+          share the same JUCE/C++ sources as the macOS release.
+          "@ | Set-Content -Path (Join-Path $stage "INSTALLATION.txt") -Encoding UTF8
+
+          $zip = Join-Path $env:GITHUB_WORKSPACE "ECHO86-Windows-x64.zip"
+          Compress-Archive -LiteralPath (Join-Path $stage "VST3"),(Join-Path $stage "INSTALLATION.txt") -DestinationPath $zip -CompressionLevel Optimal -Force
+          if ($null -ne $exe) {
+            # Include optional standalone application in the release ZIP.
+            Remove-Item -LiteralPath $zip -Force
+            Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -CompressionLevel Optimal -Force
+          }
+          if (!(Test-Path -LiteralPath $zip) -or (Get-Item -LiteralPath $zip).Length -lt 10000) {
+            throw "Windows ZIP was not packaged correctly"
+          }
+          Write-Host "Verified VST3 binary: $($binary.FullName)"
+          Write-Host "Windows distribution: $zip"
+
+      - name: Upload Windows x64 VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECHO86-Windows-x64-VST3
+          path: ECHO86-Windows-x64.zip
+          if-no-files-found: error
+          compression-level: 0

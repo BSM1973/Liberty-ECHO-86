@@ -74,6 +74,7 @@ if [[ "$ECHO86_DEVELOPER_ID_READY" == "true" ]]; then
     xcrun stapler staple "$package"
     xcrun stapler validate "$package"
     spctl --assess --type install --verbose=2 "$package"
+    echo "ECHO86_NOTARIZED=true" >> "$GITHUB_ENV"
     echo "Apple Developer ID signed + Apple notarized + stapled .pkg validated."
   else
     echo "::warning::Developer ID installer is signed, but Apple notarization secrets are not configured."

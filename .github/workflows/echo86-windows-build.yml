@@ -6,6 +6,7 @@ on:
     paths:
       - "JUCE/**"
       - ".github/workflows/echo86-windows-build.yml"
+      - "Installers/Windows/**"
 
 jobs:
   windows:
@@ -97,6 +98,44 @@ jobs:
           Write-Host "Verified VST3 binary: $($binary.FullName)"
           Write-Host "Windows distribution: $zip"
 
+      - name: Prepare Inno Setup installer compiler
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          choco install innosetup --yes --no-progress --limit-output
+          if ($LASTEXITCODE -ne 0) { throw "Could not install Inno Setup" }
+
+      - name: Create ECHO 86 Windows one-click Setup.exe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = Join-Path $env:RUNNER_TEMP "ECHO86-Windows-x64"
+          $vst3 = Join-Path $stage "VST3/ECHO 86.vst3"
+          $standalone = Join-Path $stage "Standalone/ECHO 86.exe"
+          if (!(Test-Path -LiteralPath $vst3 -PathType Container)) { throw "Staged VST3 not found" }
+          if (!(Test-Path -LiteralPath $standalone -PathType Leaf)) { throw "Staged Standalone not found" }
+          $compiler = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6/ISCC.exe"
+          if (!(Test-Path -LiteralPath $compiler)) {
+            $compiler = (Get-ChildItem -Path ${env:ProgramFiles(x86)} -Directory -Filter "Inno Setup *" |
+              ForEach-Object { Join-Path $_.FullName "ISCC.exe" } |
+              Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1)
+          }
+          if (!$compiler) { throw "Inno Setup compiler ISCC.exe not found" }
+          & $compiler "/DBuildRoot=$stage" "Installers/Windows/ECHO86.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ECHO 86 Inno Setup build failed" }
+          $setup = Join-Path $env:GITHUB_WORKSPACE "installer-output/ECHO86-Windows-x64-Setup.exe"
+          if (!(Test-Path -LiteralPath $setup -PathType Leaf) -or (Get-Item -LiteralPath $setup).Length -lt 100000) {
+            throw "Windows installer missing or unexpectedly small"
+          }
+          Write-Host "Created Windows Setup.exe at $setup"
+
+      - name: Upload Windows one-click installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECHO86-Windows-x64-Installer-EXE
+          path: installer-output/ECHO86-Windows-x64-Setup.exe
+          if-no-files-found: error
+          compression-level: 0
       - name: Upload Windows x64 VST3
         uses: actions/upload-artifact@v4
         with:

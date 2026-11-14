@@ -20,7 +20,7 @@ struct PatchExtras {
  float level1=.78f,level2=.68f,noiseLevel=0,noiseColour=.3f;
  float keyTrack=.65f,velocityFilter=.4f,filterDrive=.12f;
  float transpose=0,masterTune=0,bend=0,portamento=0,velocityResponse=.75f;
- float lfoValue=0,lfoPitch=0,pwm1=0,pwm2=0,envPitch2=0,crossMod=0;
+ float lfoValue=0,lfoPitch=0,pwm1=0,pwm2=0,envPitch2=0,crossMod=0,filterAudioFM=0;
  float ampBreak=.72f,ampDecay2=.32f,filterBreak=.4f,filterDecay2=.4f,filterRelease=.38f;
  float vintageAge=0,voiceSpread=0;
 };
@@ -106,8 +106,12 @@ struct Voice {
   const float in=(osc1*ext.level1*.58f+osc2*ext.level2*.42f+
                    noiseLp*ext.noiseLevel*.25f)*v*env*.25f;
   const float noteTrack=(note-60)*(ext.keyTrack-.65f)/12.f;
+  // Audio-rate filter FM is driven by oscillator 2, independently of
+  // cross-modulation (oscillator 1 -> oscillator 2 frequency).
+  // At depth zero, legacy presets produce identical audio.
   const float effectiveCutoff=clamp(cutoff*std::pow(2.f,filterEnv*filterAmount*5.f+
-             noteTrack+(velocity-.5f)*ext.velocityFilter*2.f),40.f,(float)sr*.45f);
+             noteTrack+(velocity-.5f)*ext.velocityFilter*2.f+
+             osc2*ext.filterAudioFM*3.f),40.f,(float)sr*.45f);
   const float g=clamp(1.f-std::exp(-2.f*(float)pi*effectiveCutoff/(float)sr),.0001f,.98f);
   const float feedback=clamp(resonance,0.f,.92f)*3.5f;
   const float drive=1.f+ext.filterDrive*4.f;

@@ -50,5 +50,34 @@ int main(){
  for(int i=0;i<10000;++i)
   assert(std::isfinite(s.sample(12000,.8f,.002f,.02f,.7f,.2f,48,.92f,.4f,.9f,
                                   .02f,.03f,.7f,1.f,ext)));
- std::cout<<"PASS native UI DSP: waves, mixer, mono priority, modulation, finite output\n";
+ // Cross Mod and FM AUDIO must have separate DSP destinations.
+ const auto fmRender=[](float cross,float filterFM){
+   echo86::Synth engine;
+   engine.prepare(48000);
+   echo86::PatchExtras p;
+   p.wave1=0;p.wave2=4;
+   p.level1=.83f;p.level2=.83f;
+   p.crossMod=cross;p.filterAudioFM=filterFM;
+   engine.noteOn(60,.95f);
+   std::vector<float> audio;
+   audio.reserve(16384);
+   for(int i=0;i<16384;++i){
+     const float v=engine.sample(2500.f,.2f,.01f,.2f,.8f,.4f,0.f,
+                                 .46f,.0f,.4f,.02f,.32f,.5f,0.f,p);
+     assert(std::isfinite(v));
+     audio.push_back(v);
+   }
+   return audio;
+ };
+ const auto original=fmRender(0.f,0.f);
+ const auto crossSound=fmRender(.8f,0.f);
+ const auto fmSound=fmRender(0.f,.8f);
+ double crossDifference=0,fmDifference=0;
+ for(size_t i=0;i<original.size();++i){
+   crossDifference+=std::abs((double)original[i]-crossSound[i]);
+   fmDifference+=std::abs((double)original[i]-fmSound[i]);
+ }
+ assert(crossDifference>.0005);
+ assert(fmDifference>.0005);
+ std::cout<<"PASS native UI DSP: waves, mixer, mono priority, modulation, independent audio FM, finite output\n";
 }

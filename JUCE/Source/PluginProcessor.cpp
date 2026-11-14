@@ -55,6 +55,7 @@ public:
  std::make_unique<juce::AudioParameterFloat>("lfoPwm2","LFO PWM 2",juce::NormalisableRange<float>(0.0f,1.0f,0.001f),0.0f),
  std::make_unique<juce::AudioParameterFloat>("envPitch2","Envelope Pitch 2",juce::NormalisableRange<float>(-1.0f,1.0f,0.001f),0.0f),
  std::make_unique<juce::AudioParameterFloat>("crossMod","Cross Modulation",juce::NormalisableRange<float>(0.0f,1.0f,0.001f),0.0f),
+ std::make_unique<juce::AudioParameterFloat>("filterAudioFM","Filter Audio FM",juce::NormalisableRange<float>(0.0f,1.0f,0.001f),0.0f),
  std::make_unique<juce::AudioParameterFloat>("chorusEnabled","Chorus Enabled",juce::NormalisableRange<float>(0.0f,1.0f,1.0f),1.0f),
  std::make_unique<juce::AudioParameterFloat>("chorusWidth","Chorus Width",juce::NormalisableRange<float>(0.0f,1.0f,0.001f),0.85f),
  std::make_unique<juce::AudioParameterFloat>("monoMode","Mono Mode",juce::NormalisableRange<float>(0.0f,1.0f,1.0f),0.0f),
@@ -125,6 +126,7 @@ public:
   ex.portamento=val("portamento");
   ex.pwm1=val("lfoPwm1");ex.pwm2=val("lfoPwm2");
   ex.envPitch2=val("envPitch2");ex.crossMod=val("crossMod");
+   ex.filterAudioFM=val("filterAudioFM");
   ex.bend=pitchWheel*val("bendRange")*100.f;
   // Independent master LFO amplitude and filter destination depth.
   // Default filter route .5 preserves the old filter modulation with factory sounds.

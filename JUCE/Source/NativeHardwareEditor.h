@@ -13,8 +13,8 @@
 #include "LfoWaveform.h"
 
 class Echo86Editor final : public juce::AudioProcessorEditor, private juce::Timer {
-    static constexpr std::array<const char*,42> extendedIds={
-      "osc1Wave","osc2Wave","osc1Oct","osc1Semi","osc1Fine","osc2Oct","osc2Semi","osc2Fine","osc1Level","osc2Level","noiseLevel","noiseColour","keyTrack","velocityToFilter","filterDrive","masterLevel","lfoWave","lfoPitch","lfoDelay","lfoPwm1","lfoPwm2","envPitch2","crossMod","chorusEnabled","chorusWidth","monoMode","portamento","transpose","masterTune","velocityResponse","bendRange","wheelVibrato","wheelFilter","pressureFilter","vintageAge","voiceSpread","ampBreak","ampDecay2","filterBreak","filterDecay2","filterRelease","lfoFilterDepth"
+    static constexpr std::array<const char*,43> extendedIds={
+      "osc1Wave","osc2Wave","osc1Oct","osc1Semi","osc1Fine","osc2Oct","osc2Semi","osc2Fine","osc1Level","osc2Level","noiseLevel","noiseColour","keyTrack","velocityToFilter","filterDrive","masterLevel","lfoWave","lfoPitch","lfoDelay","lfoPwm1","lfoPwm2","envPitch2","crossMod","chorusEnabled","chorusWidth","monoMode","portamento","transpose","masterTune","velocityResponse","bendRange","wheelVibrato","wheelFilter","pressureFilter","vintageAge","voiceSpread","ampBreak","ampDecay2","filterBreak","filterDecay2","filterRelease","lfoFilterDepth","filterAudioFM"
     };
     class HardwareLook final : public juce::LookAndFeel_V4 {
     public:
@@ -152,7 +152,7 @@ public:
         const char* filterNames[]={u8"FRÉQUENCE",u8"RÉSONANCE",u8"PROF. ENV.",u8"SUIVI CLAVIER",
             u8"VÉLOCITÉ",u8"LFO -> FILTRE",u8"FM AUDIO","DRIVE"};
         const char* filterIds[]={"cutoff","resonance","filterEnvAmount","keyTrack",
-            "velocityToFilter","lfoFilterDepth","crossMod","filterDrive"};
+            "velocityToFilter","lfoFilterDepth","filterAudioFM","filterDrive"};
         for(int i=0;i<8;++i)addKnob(0,filterX[i],774,filterNames[i],filterIds[i]);
 
         // ENVELOPES — the original two six-stage envelopes, not bitmap faders

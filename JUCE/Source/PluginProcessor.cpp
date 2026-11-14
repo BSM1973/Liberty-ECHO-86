@@ -2,6 +2,7 @@
 #include "SynthCore.h"
 #include "StereoEffects.h"
 #include "FactoryPresets.h"
+#include "LfoWaveform.h"
 class Echo86Processor final : public juce::AudioProcessor {
 public:
  Echo86Processor():juce::AudioProcessor(BusesProperties().withOutput("Output",juce::AudioChannelSet::stereo(),true)),
@@ -17,6 +18,7 @@ public:
  std::make_unique<juce::AudioParameterFloat>("waveMix","Pulse / Saw",0.f,1.f,0.f),
  std::make_unique<juce::AudioParameterFloat>("lfoRate","LFO Rate",.05f,16.f,2.f),
  std::make_unique<juce::AudioParameterFloat>("lfoDepth","LFO Depth",0.f,1.f,0.f),
+ std::make_unique<juce::AudioParameterFloat>("lfoFilterDepth","LFO to Filter",juce::NormalisableRange<float>(0.f,1.f,.001f),.5f),
  std::make_unique<juce::AudioParameterFloat>("filterEnvAmount","Filter Envelope",0.f,1.f,.4f),
  std::make_unique<juce::AudioParameterFloat>("filterAttack","Filter Attack",.005f,3.f,.02f),
  std::make_unique<juce::AudioParameterFloat>("filterDecay","Filter Decay",.02f,4.f,.35f),
@@ -124,9 +126,13 @@ public:
   ex.pwm1=val("lfoPwm1");ex.pwm2=val("lfoPwm2");
   ex.envPitch2=val("envPitch2");ex.crossMod=val("crossMod");
   ex.bend=pitchWheel*val("bendRange")*100.f;
-  const float lfoPitch=val("lfoPitch")+modWheel*val("wheelVibrato");
-  const float lfoDepth=depth+modWheel*val("wheelFilter")+
-                              channelPressure*val("pressureFilter");
+  // Independent master LFO amplitude and filter destination depth.
+  // Default filter route .5 preserves the old filter modulation with factory sounds.
+  ex.pwm1*=depth;ex.pwm2*=depth;
+  const float lfoPitch=val("lfoPitch")*depth+modWheel*val("wheelVibrato");
+  const float filterRoute=depth*val("lfoFilterDepth")*4.f+
+      modWheel*val("wheelFilter")*2.f+
+      channelPressure*val("pressureFilter")*2.f;
   const int wave=(int)val("lfoWave");
   const float delay=val("lfoDelay");
   echo86::StereoEffects::Parameters fx;
@@ -137,10 +143,7 @@ public:
   fx.reverbMix=val("reverbMix");fx.reverbSize=val("reverbSize");
   for(int i=start;i<end;++i){
    const float phase=(float)lfoPhase;
-   float lfo=std::sin(phase);
-   if(wave==1)lfo=2.f/(float)echo86::pi*std::asin(std::sin(phase));
-   if(wave==2)lfo=std::sin(phase)>=0?1.f:-1.f;
-   if(wave==3)lfo=lfoHeld;
+   const float lfo=echo86::lfoWaveSample(wave,phase,lfoHeld);
    lfoPhase+=2.0*echo86::pi*rate/synth.sampleRate;
    if(lfoPhase>=2*echo86::pi){
     lfoPhase-=2*echo86::pi;
@@ -151,7 +154,7 @@ public:
    const float fade=delay<=.001f?1.f:echo86::clamp((float)((lfoAge-delay)/.05),0.f,1.f);
    ex.lfoValue=lfo*fade;
    ex.lfoPitch=lfoPitch;
-   const float modCutoff=echo86::clamp(cutoff*std::pow(2.f,ex.lfoValue*lfoDepth*2.f),60.f,16000.f);
+   const float modCutoff=echo86::clamp(cutoff*std::pow(2.f,ex.lfoValue*filterRoute),60.f,16000.f);
    float x=synth.sample(modCutoff,res,a,d,sus,release,det,pw,mix,fe,fa,fd,fs,sync,ex);
    float left=x,right=x;
    effects.process(left,right,fx);

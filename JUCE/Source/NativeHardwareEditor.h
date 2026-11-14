@@ -269,27 +269,96 @@ private:
         g.setColour(color);g.setFont(juce::Font(juce::FontOptions(size*scaleY())));
         g.drawFittedText(msg,rect(x,y,w,h),just,1,.78f);
     }
+    // Live APVTS envelope preview. SynthCore uses exponential responses; the
+    // displayed stage times are compressed to keep both fast and slow sounds legible.
     void envelopePlot(juce::Graphics& g,int x,int y,int w,int h,bool filter){
-        const auto r=rect(x,y,w,h).toFloat();
-        g.setColour(juce::Colour(0xff122024));g.fillRoundedRectangle(r,2);
-        g.setColour(juce::Colour(0xff46605f));g.drawRoundedRectangle(r,2,1);
-        for(int i=1;i<5;++i){
-            const auto yy=(y+i*h/5)*scaleY();
-            g.setColour(juce::Colour(0x283d6567));
-            g.drawLine((x+10)*scaleX(),yy,(x+w-10)*scaleX(),yy,1);
+        const auto bounds=rect(x,y,w,h).toFloat();
+        g.setColour(juce::Colour(0xff122024));g.fillRoundedRectangle(bounds,2);
+        g.setColour(juce::Colour(0xff46605f));g.drawRoundedRectangle(bounds,2,1);
+        const auto value=[this](const char* id,float fallback){
+            if(const auto* p=processor.state.getRawParameterValue(id)){
+                const float v=p->load();
+                if(std::isfinite(v))return v;
+            }
+            return fallback;
+        };
+        const float attack=value(filter?"filterAttack":"attack",.02f);
+        const float decay1=value(filter?"filterDecay":"decay",.35f);
+        const float breakpoint=juce::jlimit(0.f,1.f,
+                             value(filter?"filterBreak":"ampBreak",.7f));
+        const float decay2=value(filter?"filterDecay2":"ampDecay2",.32f);
+        const float sustain=juce::jlimit(0.f,1.f,
+                            value(filter?"filterSustain":"sustain",.55f));
+        const float release=value(filter?"filterRelease":"release",.38f);
+
+        // 6.9 exponential time constants reach 99.9% of the target level.
+        const std::array<float,5> durations{{
+            juce::jmax(.001f,attack*1.59f),juce::jmax(.001f,decay1*1.59f),
+            juce::jmax(.001f,decay2*2.62f),.55f,
+            juce::jmax(.001f,release*1.59f)
+        }};
+        std::array<float,6> xs{};
+        std::array<float,5> widths{};
+        float total=0.f;
+        for(int k=0;k<5;++k){
+            widths[(size_t)k]=std::sqrt(durations[(size_t)k])+.075f;
+            total+=widths[(size_t)k];
         }
-        juce::Path curve;
-        curve.startNewSubPath((x+25)*scaleX(),(y+h-18)*scaleY());
-        curve.lineTo((x+65)*scaleX(),(y+35)*scaleY());
-        curve.cubicTo((x+108)*scaleX(),(y+60)*scaleY(),(x+110)*scaleX(),(y+95)*scaleY(),
-                         (x+156)*scaleX(),(y+(filter?112:86))*scaleY());
-        curve.cubicTo((x+200)*scaleX(),(y+(filter?142:107))*scaleY(),
-                        (x+230)*scaleX(),(y+(filter?142:107))*scaleY(),
-                        (x+285)*scaleX(),(y+(filter?142:107))*scaleY());
-        curve.lineTo((x+w-50)*scaleX(),(y+(filter?142:107))*scaleY());
-        curve.cubicTo((x+w-40)*scaleX(),(y+h-26)*scaleY(),(x+w-18)*scaleX(),(y+h-18)*scaleY(),
-                         (x+w-12)*scaleX(),(y+h-18)*scaleY());
-        g.setColour(juce::Colour(0xffe2bb64));g.strokePath(curve,juce::PathStrokeType(2*scaleY()));
+        const float left=bounds.getX()+18.f*scaleX();
+        const float right=bounds.getRight()-18.f*scaleX();
+        const float top=bounds.getY()+16.f*scaleY();
+        const float bottom=bounds.getBottom()-28.f*scaleY();
+        const auto py=[&](float level){
+            return bottom-juce::jlimit(0.f,1.f,level)*(bottom-top);
+        };
+        xs[0]=left;
+        for(int k=0;k<5;++k)
+            xs[(size_t)k+1]=xs[(size_t)k]+(right-left)*widths[(size_t)k]/total;
+
+        for(int i=1;i<=4;++i){
+            g.setColour(juce::Colour(0x2b608080));
+            const float gy=top+(bottom-top)*(float)i/5.f;
+            g.drawLine(left,gy,right,gy,1);
+        }
+        const std::array<float,6> levels{{0.f,1.f,breakpoint,sustain,sustain,0.f}};
+        juce::Path line;
+        line.startNewSubPath(left,py(0));
+        for(int stage=0;stage<5;++stage){
+            for(int step=1;step<=30;++step){
+                const float t=(float)step/30.f;
+                const float shape=(1.f-std::exp(-6.907755f*t))/.999f;
+                const float level=stage==3 ? sustain :
+                    levels[(size_t)stage]+
+                    (levels[(size_t)stage+1]-levels[(size_t)stage])*shape;
+                line.lineTo(xs[(size_t)stage]+
+                    (xs[(size_t)stage+1]-xs[(size_t)stage])*t,py(level));
+            }
+        }
+        juce::Path under=line;
+        under.lineTo(right,bottom);under.lineTo(left,bottom);under.closeSubPath();
+        g.setGradientFill(juce::ColourGradient(juce::Colour(0x55e2bb64),left,top,
+                                               juce::Colour(0x07e2bb64),left,bottom,false));
+        g.fillPath(under);
+        for(int i=1;i<5;++i){
+            g.setColour(juce::Colour(0x586d8584));
+            g.drawVerticalLine(juce::roundToInt(xs[(size_t)i]),top,bottom);
+        }
+        g.setColour(juce::Colour(0xffe9c16f));
+        g.strokePath(line,juce::PathStrokeType(2.7f*scaleY()));
+        for(int i=1;i<5;++i){
+            g.setColour(juce::Colour(0xfff5dca1));
+            g.fillEllipse(xs[(size_t)i]-3.2f*scaleX(),py(levels[(size_t)i])-3.2f*scaleY(),
+                          6.4f*scaleX(),6.4f*scaleY());
+        }
+        const char* stages[]={"A","D1","D2","S","R"};
+        g.setColour(juce::Colour(0xffa8c7c1));
+        g.setFont(juce::Font(juce::FontOptions(11.f*scaleY())));
+        for(int k=0;k<5;++k){
+            const float mid=(xs[(size_t)k]+xs[(size_t)k+1])/2.f;
+            g.drawText(stages[k],juce::Rectangle<float>(
+                       mid-20.f*scaleX(),bottom+4.f*scaleY(),40.f*scaleX(),13.f*scaleY()),
+                       juce::Justification::centred);
+        }
     }
 public:
     void paint(juce::Graphics& g)override{
@@ -420,6 +489,13 @@ private:
         c.slider->setColour(juce::Slider::textBoxBackgroundColourId,juce::Colour(0xff101b1e));
         c.slider->setColour(juce::Slider::textBoxOutlineColourId,juce::Colour(0xff495c5b));
         c.slider->setTooltip(c.name);
+        if(pg==1)c.slider->onValueChange=[this]{
+            // Immediate preview feedback during a fader drag.
+            if(page==1){
+                repaint(rect(60,341,400,205));
+                repaint(rect(60,675,400,205));
+            }
+        };
         if(processor.state.getParameter(id)==nullptr)return;
         c.attachment=std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
                             processor.state,id,*c.slider);
@@ -460,7 +536,14 @@ private:
                 b.button->setToggleState(std::abs(raw->load()-b.value)<.01f,juce::dontSendNotification);
         }
     }
-    void timerCallback()override{refreshSwitches();}
+    void timerCallback()override{
+        refreshSwitches();
+        if(page==1){
+            // Host automation and preset recall update both envelope plots.
+            repaint(rect(60,341,400,205));
+            repaint(rect(60,675,400,205));
+        }
+    }
     static juce::String readablePresetName(const char* utf8){
         return juce::String::fromUTF8(utf8)
              .replace(juce::String::fromUTF8(u8" • "), " - ");

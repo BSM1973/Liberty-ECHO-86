@@ -107,24 +107,24 @@ class Echo86Editor final : public juce::AudioProcessorEditor, private juce::Time
     static constexpr int W=1600,H=1069;
 public:
     explicit Echo86Editor(Echo86Processor& p):juce::AudioProcessorEditor(p),processor(p) {
-        const char* names[]={"01  VOICE","02  ENVELOPES","03  MODULATION","04  PERFORMANCE / FX"};
+        const char* names[]={u8"01  VOIX",u8"02  ENVELOPPES","03  MODULATION",u8"04  PERFORMANCE / FX"};
         for(int i=0;i<4;++i){
-            tabs[(size_t)i]=std::make_unique<juce::TextButton>(names[i]);
+            tabs[(size_t)i]=std::make_unique<juce::TextButton>(juce::String::fromUTF8(names[i]));
             tabs[(size_t)i]->setLookAndFeel(&look);
             tabs[(size_t)i]->onClick=[this,i]{setPage(i);};
             addAndMakeVisible(*tabs[(size_t)i]);
         }
-        auto top=[&](std::unique_ptr<juce::TextButton>& target,const juce::String& title,
+        auto top=[&](std::unique_ptr<juce::TextButton>& target,const char* title,
                      std::function<void()> onClick){
-            target=std::make_unique<juce::TextButton>(title);
+            target=std::make_unique<juce::TextButton>(juce::String::fromUTF8(title));
             target->setLookAndFeel(&look);
             target->onClick=std::move(onClick);
             addAndMakeVisible(*target);
         };
         top(presetButton,"PRESETS",[this]{openPresets();});
-        top(prevButton,"◀",[this]{nextPreset(-1);});
+        top(prevButton,"<",[this]{nextPreset(-1);});
         top(initButton,"INIT",[this]{loadPreset(0);});
-        top(nextButton,"▶",[this]{nextPreset(1);});
+        top(nextButton,">",[this]{nextPreset(1);});
 
         // VOICE — original dual oscillator / mixer / analog filter arrangement
         const char* modes[]={"SAW","SQUARE","PULSE","TRIANGLE","SINE","SAW + PW"};
@@ -132,28 +132,28 @@ public:
             addSwitch(0,60+n*118,332,108,52,modes[n],"osc1Wave",(float)n);
             addSwitch(0,830+n*118,332,108,52,modes[n],"osc2Wave",(float)n);
         }
-        addKnob(0,125,459,"OCTAVE","osc1Oct"); addKnob(0,270,459,"SEMITONE","osc1Semi");
-        addKnob(0,415,459,"FINE","osc1Fine"); addKnob(0,560,459,"PULSE WIDTH","pulseWidth");
+        addKnob(0,125,459,"OCTAVE","osc1Oct"); addKnob(0,270,459,u8"DEMI-TON","osc1Semi");
+        addKnob(0,415,459,u8"ACCORD FIN","osc1Fine"); addKnob(0,560,459,u8"LARGEUR PULSE","pulseWidth");
         addKnob(0,705,459,"PWM","lfoPwm1");
-        addKnob(0,895,459,"OCTAVE","osc2Oct");addKnob(0,1040,459,"SEMITONE","osc2Semi");
-        addKnob(0,1185,459,"FINE","osc2Fine");addKnob(0,1330,459,"PULSE WIDTH","pulseWidth");
+        addKnob(0,895,459,"OCTAVE","osc2Oct");addKnob(0,1040,459,u8"DEMI-TON","osc2Semi");
+        addKnob(0,1185,459,u8"ACCORD FIN","osc2Fine");addKnob(0,1330,459,u8"LARGEUR PULSE","pulseWidth");
         addKnob(0,1475,459,"PWM","lfoPwm2");
-        addSwitch(0,830,556,115,35,"FREE","hardSync",0);
+        addSwitch(0,830,556,115,35,u8"LIBRE","hardSync",0);
         addSwitch(0,956,556,115,35,"SYNC","hardSync",1);
         addHorizontal(0,1175,572,"CROSS MOD","crossMod",180);
-        addHorizontal(0,1435,572,"ENV → PITCH","envPitch2",180);
+        addHorizontal(0,1435,572,u8"ENV -> HAUTEUR","envPitch2",180);
         addFader(0,108,818,"OSC 1","osc1Level");addFader(0,210,818,"OSC 2","osc2Level");
-        addFader(0,312,818,"NOISE","noiseLevel");addKnob(0,408,766,"COLOUR","noiseColour");
+        addFader(0,312,818,"NOISE","noiseLevel");addKnob(0,408,766,u8"COULEUR","noiseColour");
         const int filterX[]={570,700,830,960,1090,1220,1350,1480};
-        const char* filterNames[]={"CUTOFF","RESONANCE","ENV DEPTH","KEY TRACK",
-            "VELOCITY","LFO DEPTH","AUDIO FM","DRIVE"};
+        const char* filterNames[]={u8"FRÉQUENCE",u8"RÉSONANCE",u8"PROF. ENV.",u8"SUIVI CLAVIER",
+            u8"VÉLOCITÉ",u8"PROF. LFO",u8"FM AUDIO","DRIVE"};
         const char* filterIds[]={"cutoff","resonance","filterEnvAmount","keyTrack",
             "velocityToFilter","lfoDepth","crossMod","filterDrive"};
         for(int i=0;i<8;++i)addKnob(0,filterX[i],774,filterNames[i],filterIds[i]);
 
         // ENVELOPES — the original two six-stage envelopes, not bitmap faders
         const int faderX[]={576,753,930,1107,1284,1461};
-        const char* envNames[]={"ATTACK","DECAY 1","BREAKPOINT","DECAY 2","SUSTAIN","RELEASE"};
+        const char* envNames[]={u8"ATTAQUE",u8"DÉCLIN 1",u8"RUPTURE",u8"DÉCLIN 2",u8"MAINTIEN",u8"RELÂCHEMENT"};
         const char* ampIds[]={"attack","decay","ampBreak","ampDecay2","sustain","release"};
         const char* filIds[]={"filterAttack","filterDecay","filterBreak","filterDecay2","filterSustain","filterRelease"};
         for(int i=0;i<6;++i){
@@ -164,38 +164,38 @@ public:
         // MODULATION — waveform, rate/depth, pitch and routing
         const char* lfoModes[]={"SINE","TRIANGLE","SQUARE","S & H"};
         for(int i=0;i<4;++i)addSwitch(2,64+i*176,353,165,60,lfoModes[i],"lfoWave",(float)i);
-        addKnob(2,153,521,"RATE","lfoRate");
-        addKnob(2,333,521,"DEPTH","lfoDepth");
-        addKnob(2,513,521,"PITCH","lfoPitch");
-        addKnob(2,693,521,"DELAY","lfoDelay");
-        addKnob(2,918,423,"LFO → FILTER","lfoDepth");
-        addKnob(2,1095,423,"LFO → PWM 1","lfoPwm1");
-        addKnob(2,1272,423,"LFO → PWM 2","lfoPwm2");
-        addKnob(2,1448,423,"ENV 2 → OSC 2","envPitch2");
-        addKnob(2,955,768,"WHEEL VIBRATO","wheelVibrato");
-        addKnob(2,1188,768,"WHEEL → VCF","wheelFilter");
-        addKnob(2,1424,768,"PRESSURE → VCF","pressureFilter");
+        addKnob(2,153,521,u8"VITESSE","lfoRate");
+        addKnob(2,333,521,u8"PROFONDEUR","lfoDepth");
+        addKnob(2,513,521,u8"HAUTEUR","lfoPitch");
+        addKnob(2,693,521,u8"RETARD","lfoDelay");
+        addKnob(2,918,423,u8"LFO -> FILTRE","lfoDepth");
+        addKnob(2,1095,423,"LFO -> PWM 1","lfoPwm1");
+        addKnob(2,1272,423,"LFO -> PWM 2","lfoPwm2");
+        addKnob(2,1448,423,"ENV. 2 -> OSC. 2","envPitch2");
+        addKnob(2,955,768,u8"VIBRATO MOLETTE","wheelVibrato");
+        addKnob(2,1188,768,u8"MOLETTE -> VCF","wheelFilter");
+        addKnob(2,1424,768,u8"PRESSION -> VCF","pressureFilter");
 
         // PERFORMANCE — voice, expression, chorus, vintage character
         addSwitch(3,66,372,212,54,"POLY","monoMode",0);
-        addSwitch(3,291,372,212,54,"MONO / LOW NOTE","monoMode",1);
+        addSwitch(3,291,372,212,54,u8"MONO / NOTE BASSE","monoMode",1);
         const int perfX[]={143,302,461,620,779};
-        const char* perfNames[]={"PORTAMENTO","TRANSPOSE","MASTER TUNE","VELOCITY","BEND RANGE"};
+        const char* perfNames[]={"PORTAMENTO",u8"TRANSPOSITION",u8"ACCORD GÉNÉRAL",u8"VÉLOCITÉ",u8"PLAGE PITCH"};
         const char* perfIds[]={"portamento","transpose","masterTune","velocityResponse","bendRange"};
         for(int i=0;i<5;++i)addKnob(3,perfX[i],544,perfNames[i],perfIds[i]);
-        addKnob(3,195,717,"WHEEL VIBRATO","wheelVibrato");
-        addKnob(3,461,717,"WHEEL → VCF","wheelFilter");
-        addKnob(3,726,717,"PRESSURE → VCF","pressureFilter");
+        addKnob(3,195,717,u8"VIBRATO MOLETTE","wheelVibrato");
+        addKnob(3,461,717,u8"MOLETTE -> VCF","wheelFilter");
+        addKnob(3,726,717,u8"PRESSION -> VCF","pressureFilter");
         addSwitch(3,925,373,123,54,"OFF","chorusEnabled",0);
         addSwitch(3,1060,373,123,54,"ON","chorusEnabled",1);
-        addKnob(3,1000,548,"RATE","chorusRate");
-        addKnob(3,1156,548,"DEPTH","chorusDepth");
-        addKnob(3,1312,548,"WIDTH","chorusWidth");
-        addKnob(3,1468,548,"MIX","chorusMix");
-        addKnob(3,1122,791,"VINTAGE AGE","vintageAge");
-        addKnob(3,1414,791,"VOICE SPREAD","voiceSpread");
+        addKnob(3,1000,548,u8"VITESSE","chorusRate");
+        addKnob(3,1156,548,u8"PROFONDEUR","chorusDepth");
+        addKnob(3,1312,548,u8"LARGEUR","chorusWidth");
+        addKnob(3,1468,548,u8"MÉLANGE","chorusMix");
+        addKnob(3,1122,791,u8"ÂGE VINTAGE","vintageAge");
+        addKnob(3,1414,791,u8"ÉCART VOIX","voiceSpread");
         for(int i=0;i<4;++i)tabs[(size_t)i]->setClickingTogglesState(false);
-        addKnob(-1,1510,1001,"MASTER OUTPUT","masterLevel",82,104);
+        addKnob(-1,1510,1001,u8"VOLUME GÉNÉRAL","masterLevel",82,104);
         prepared=true;
         setResizable(true,true);
         if(auto* c=getConstrainer())c->setFixedAspectRatio((double)W/H);
@@ -237,6 +237,16 @@ private:
         }
         g.setColour(juce::Colour(0xff3d5355));g.drawLine((x+18)*scaleX(),(y+48)*scaleY(),
                             (x+w-18)*scaleX(),(y+48)*scaleY(),1);
+    }
+    // All literal UI strings are decoded as UTF-8 before reaching JUCE text drawing.
+    void section(juce::Graphics& g,int x,int y,int w,int h,
+                 const char* title,const char* hint=""){
+        section(g,x,y,w,h,juce::String::fromUTF8(title),juce::String::fromUTF8(hint));
+    }
+    void simpleText(juce::Graphics& g,const char* msg,int x,int y,int w,int h,
+                    float size,juce::Colour color,
+                    juce::Justification just=juce::Justification::centredLeft){
+        simpleText(g,juce::String::fromUTF8(msg),x,y,w,h,size,color,just);
     }
     void simpleText(juce::Graphics& g,const juce::String& msg,int x,int y,int w,int h,
                      float size,juce::Colour color,juce::Justification just=juce::Justification::centredLeft){
@@ -280,7 +290,7 @@ public:
         }
         simpleText(g,"L I B E R T Y   MUSIC SOFTWARE",38,33,390,29,17,juce::Colour(0xffd9dfca));
         simpleText(g,"ECHO 86",38,65,555,83,72,juce::Colour(0xffe6e4c9));
-        simpleText(g,"VINTAGE ITALIAN ANALOG SYNTHESIZER",39,153,540,23,14,juce::Colour(0xff82a8a8));
+        simpleText(g,u8"SYNTHÉTISEUR ANALOGIQUE VINTAGE",39,153,540,23,14,juce::Colour(0xff82a8a8));
         auto screen=rect(695,44,610,124).toFloat();
         g.setColour(juce::Colour(0xff0a1c1e));g.fillRoundedRectangle(screen,5);
         auto lcd=rect(708,55,584,101).toFloat();
@@ -289,35 +299,35 @@ public:
         g.fillRoundedRectangle(lcd,2);
         simpleText(g,"PROGRAM "+juce::String(selectedPreset<0?0:selectedPreset+1).paddedLeft('0',3),
                           727,62,245,23,12,juce::Colour(0xff655034));
-        simpleText(g,"100 FACTORY SOUNDS",1046,62,228,23,12,juce::Colour(0xff655034),
+        simpleText(g,u8"100 PRESETS D\x27USINE",1046,62,228,23,12,juce::Colour(0xff655034),
                    juce::Justification::centredRight);
         const auto display=selectedPreset<0?juce::String("Init"):
-                  juce::String::fromUTF8(echo86::factoryPresets[(size_t)selectedPreset].name);
+                  readablePresetName(echo86::factoryPresets[(size_t)selectedPreset].name);
         simpleText(g,display,727,89,540,39,31,juce::Colour(0xff392d22));
         g.setColour(juce::Colour(0xff51696a));
         g.drawLine(39*scaleX(),190*scaleY(),1560*scaleX(),190*scaleY(),1.5f);
         switch(page){
           case 0:
-            section(g,40,277,750,333,"OSCILLATOR 1","MASTER");
-            section(g,810,277,750,333,"OSCILLATOR 2","SLAVE / SYNC");
-            section(g,40,629,429,292,"MIXER / NOISE","PRE VCF");
-            section(g,487,629,1073,292,"ANALOG FILTER","4-POLE / 24 dB");
-            simpleText(g,"DUAL-WAVE ENGINE",60,584,330,18,11,juce::Colour(0xff819395));
-            simpleText(g,"OSC 1 → OSC 2     •     FREE / SYNC",830,529,470,17,11,juce::Colour(0xff839f9f));
+            section(g,40,277,750,333,u8"OSCILLATEUR 1","MASTER");
+            section(g,810,277,750,333,u8"OSCILLATEUR 2",u8"ESCLAVE / SYNC");
+            section(g,40,629,429,292,u8"MIXEUR / BRUIT",u8"AVANT FILTRE");
+            section(g,487,629,1073,292,u8"FILTRE ANALOGIQUE",u8"4 PÔLES / 24 dB");
+            simpleText(g,u8"DOUBLE OSCILLATEUR",60,584,330,18,11,juce::Colour(0xff819395));
+            simpleText(g,"OSC 1 -> OSC 2 / LIBRE / SYNC",830,529,470,17,11,juce::Colour(0xff839f9f));
             break;
           case 1:
-            section(g,40,277,1520,315,"ENVELOPE 1 / AMPLIFIER","SIX STAGES");
-            section(g,40,611,1520,310,"ENVELOPE 2 / FILTER","SIX STAGES");
+            section(g,40,277,1520,315,u8"ENVELOPPE 1 / AMPLITUDE",u8"SIX ÉTAPES");
+            section(g,40,611,1520,310,u8"ENVELOPPE 2 / FILTRE",u8"SIX ÉTAPES");
             envelopePlot(g,60,341,400,205,false);
             envelopePlot(g,60,675,400,205,true);
-            simpleText(g,"A → D1 → BP → D2 → S → R",82,552,367,18,11,juce::Colour(0xff91a6a2));
-            simpleText(g,"A → D1 → BP → D2 → S → R",82,884,367,18,11,juce::Colour(0xff91a6a2));
+            simpleText(g,"A - D1 - BP - D2 - S - R",82,552,367,18,11,juce::Colour(0xff91a6a2));
+            simpleText(g,"A - D1 - BP - D2 - S - R",82,884,367,18,11,juce::Colour(0xff91a6a2));
             break;
           case 2: {
-            section(g,40,277,750,644,"LOW FREQUENCY OSCILLATOR","LFO");
-            section(g,810,277,750,315,"MODULATION ROUTES","DIRECT CONTROL");
-            section(g,810,611,750,310,"MIDI EXPRESSION","WHEEL / PRESSURE");
-            simpleText(g,"WAVEFORM",65,323,240,19,14,juce::Colour(0xffd5dbc7));
+            section(g,40,277,750,644,u8"OSCILLATEUR BASSE FRÉQUENCE","LFO");
+            section(g,810,277,750,315,u8"ROUTAGES DE MODULATION",u8"CONTRÔLE DIRECT");
+            section(g,810,611,750,310,u8"EXPRESSION MIDI",u8"MOLETTE / PRESSION");
+            simpleText(g,u8"FORME D\x27ONDE",65,323,240,19,14,juce::Colour(0xffd5dbc7));
             auto r=rect(67,647,694,140);
             g.setColour(juce::Colour(0xff121e21));g.fillRoundedRectangle(r.toFloat(),3);
             g.setColour(juce::Colour(0xff4f6868));g.drawRoundedRectangle(r.toFloat(),3,1);
@@ -328,14 +338,14 @@ public:
                 if(i==0)sine.startNewSubPath(x,y);else sine.lineTo(x,y);
             }
             g.setColour(juce::Colour(0xffd7bd74));g.strokePath(sine,juce::PathStrokeType(2*scaleY()));
-            simpleText(g,"MODULATION WAVEFORM",82,656,340,22,13,juce::Colour(0xff819b9c));
+            simpleText(g,u8"FORME D\x27ONDE LFO",82,656,340,22,13,juce::Colour(0xff819b9c));
             break;
           }
           default:
-            section(g,40,277,845,644,"PERFORMANCE","KEYBOARD CONTROL");
-            section(g,903,277,657,355,"VINTAGE STEREO CHORUS","BBD-STYLE");
-            section(g,903,649,657,272,"VINTAGE CHARACTER","VOICE VARIATION");
-            simpleText(g,"VOICE MODE",65,338,260,23,14,juce::Colour(0xffd6ddcb));
+            section(g,40,277,845,644,"PERFORMANCE",u8"CONTRÔLE CLAVIER");
+            section(g,903,277,657,355,u8"CHORUS STÉRÉO VINTAGE","BBD-STYLE");
+            section(g,903,649,657,272,u8"CARACTÈRE VINTAGE",u8"VARIATIONS DE VOIX");
+            simpleText(g,u8"MODE VOIX",65,338,260,23,14,juce::Colour(0xffd6ddcb));
             simpleText(g,"CHORUS",925,339,255,23,14,juce::Colour(0xffd6ddcb));
             break;
         }
@@ -349,9 +359,9 @@ public:
         g.setColour(juce::Colour(0xff4b6163));
         g.drawLine(39*scaleX(),944*scaleY(),1561*scaleX(),944*scaleY(),1);
         simpleText(g,"LIBERTY / E86",53,966,390,27,16,juce::Colour(0xffb7d1c8));
-        simpleText(g,"16 VOICES   •   2 DCO   •   MIDI   •   100 FACTORY SOUNDS",53,1002,1000,17,12,
+        simpleText(g,u8"16 VOIX / 2 DCO / MIDI / 100 PRESETS D\x27USINE",53,1002,1000,17,12,
                    juce::Colour(0xff91a9a5));
-        simpleText(g,"MASTER OUTPUT",1262,969,199,26,14,juce::Colour(0xffd5e0ce),
+        simpleText(g,u8"VOLUME GÉNÉRAL",1262,969,199,26,14,juce::Colour(0xffd5e0ce),
                     juce::Justification::centredRight);
     }
     void resized()override{
@@ -367,21 +377,21 @@ public:
         for(auto& b:switches)b.button->setBounds(rect(b.x,b.y,b.w,b.h));
     }
 private:
-    void addKnob(int pg,int x,int y,const juce::String& name,const char* id,
+    void addKnob(int pg,int x,int y,const char* name,const char* id,
                  int w=86,int h=105){
         addControl(pg,x,y,name,id,w,h,false);
     }
-    void addFader(int pg,int x,int y,const juce::String& name,const char* id){
+    void addFader(int pg,int x,int y,const char* name,const char* id){
         addControl(pg,x,y,name,id,72,188,true);
     }
-    void addHorizontal(int pg,int x,int y,const juce::String& name,const char* id,int width){
+    void addHorizontal(int pg,int x,int y,const char* name,const char* id,int width){
         addControl(pg,x,y,name,id,width,47,false);
         if(!knobs.empty())knobs.back().slider->setSliderStyle(juce::Slider::LinearHorizontal);
     }
-    void addControl(int pg,int x,int y,const juce::String& name,const char* id,
+    void addControl(int pg,int x,int y,const char* name,const char* id,
                     int w,int h,bool fader){
         Knob c;
-        c.page=pg;c.x=x;c.y=y;c.w=w;c.h=h;c.name=name;
+        c.page=pg;c.x=x;c.y=y;c.w=w;c.h=h;c.name=juce::String::fromUTF8(name);
         c.slider=std::make_unique<juce::Slider>();
         c.slider->setLookAndFeel(&look);
         c.slider->setSliderStyle(fader?juce::Slider::LinearVertical:
@@ -392,18 +402,18 @@ private:
         c.slider->setColour(juce::Slider::textBoxTextColourId,juce::Colour(0xffd4dfd2));
         c.slider->setColour(juce::Slider::textBoxBackgroundColourId,juce::Colour(0xff101b1e));
         c.slider->setColour(juce::Slider::textBoxOutlineColourId,juce::Colour(0xff495c5b));
-        c.slider->setTooltip(name);
+        c.slider->setTooltip(c.name);
         if(processor.state.getParameter(id)==nullptr)return;
         c.attachment=std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
                             processor.state,id,*c.slider);
         addAndMakeVisible(*c.slider);
         knobs.push_back(std::move(c));
     }
-    void addSwitch(int pg,int x,int y,int w,int h,const juce::String& title,
+    void addSwitch(int pg,int x,int y,int w,int h,const char* title,
                    const char* id,float value){
         Switch s;
         s.page=pg;s.x=x;s.y=y;s.w=w;s.h=h;s.id=id;s.value=value;
-        s.button=std::make_unique<juce::TextButton>(title);
+        s.button=std::make_unique<juce::TextButton>(juce::String::fromUTF8(title));
         s.button->setLookAndFeel(&look);
         s.button->onClick=[this,parameter=juce::String(id),value]{
             setParameter(parameter,value);
@@ -434,6 +444,10 @@ private:
         }
     }
     void timerCallback()override{refreshSwitches();}
+    static juce::String readablePresetName(const char* utf8){
+        return juce::String::fromUTF8(utf8)
+             .replace(juce::String::fromUTF8(u8" • "), " - ");
+    }
     void loadPreset(int index){
         if(index<0||index>=(int)echo86::factoryPresets.size())return;
         const auto& preset=echo86::factoryPresets[(size_t)index];
@@ -459,15 +473,15 @@ private:
             juce::PopupMenu sub;
             const auto prefix=juce::String(group)+" ";
             for(int i=0;i<(int)echo86::factoryPresets.size();++i){
-                const auto name=juce::String::fromUTF8(echo86::factoryPresets[(size_t)i].name);
+                const auto name=readablePresetName(echo86::factoryPresets[(size_t)i].name);
                 if(name.startsWithIgnoreCase(prefix))
                     sub.addItem(i+1,name,true,i==selectedPreset);
             }
             if(sub.getNumItems()>0)menu.addSubMenu(group,sub);
         }
         menu.addSeparator();
-        menu.addItem(1001,"IMPORT USER PRESET...");
-        menu.addItem(1002,"EXPORT USER PRESET...");
+        menu.addItem(1001,juce::String::fromUTF8(u8"IMPORTER UN PRÉRÉGLAGE..."));
+        menu.addItem(1002,juce::String::fromUTF8(u8"EXPORTER UN PRÉRÉGLAGE..."));
         juce::Component::SafePointer<Echo86Editor> safe(this);
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(presetButton.get()),
              [safe](int result){
@@ -482,7 +496,7 @@ private:
         root->setProperty("format","ECHO86-PRESET");
         root->setProperty("version",1);
         root->setProperty("name",selectedPreset<0?"Init":
-             juce::String::fromUTF8(echo86::factoryPresets[(size_t)selectedPreset].name));
+             readablePresetName(echo86::factoryPresets[(size_t)selectedPreset].name));
         auto* values=new juce::DynamicObject();
         for(auto* id:echo86::parameterIds)
             values->setProperty(id,processor.state.getRawParameterValue(id)->load());
@@ -494,7 +508,7 @@ private:
     void exportPreset(){
         auto suggested=juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
                         .getChildFile("ECHO86-Sound.echo86");
-        chooser=std::make_unique<juce::FileChooser>("Export ECHO 86",suggested,"*.echo86");
+        chooser=std::make_unique<juce::FileChooser>(juce::String::fromUTF8(u8"Exporter un son ECHO 86"),suggested,"*.echo86");
         juce::Component::SafePointer<Echo86Editor> safe(this);
         chooser->launchAsync(juce::FileBrowserComponent::saveMode|
                 juce::FileBrowserComponent::canSelectFiles|
@@ -505,11 +519,11 @@ private:
                   if(file==juce::File{})return;
                   if(!file.replaceWithText(juce::JSON::toString(safe->serializePreset(),true)))
                      juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
-                                                            "ECHO 86","Cannot export preset");
+                                                            "ECHO 86",juce::String::fromUTF8(u8"Impossible d\x27exporter le préréglage"));
                 });
     }
     void importPreset(){
-        chooser=std::make_unique<juce::FileChooser>("Import ECHO 86",juce::File{},"*.echo86");
+        chooser=std::make_unique<juce::FileChooser>(juce::String::fromUTF8(u8"Importer un son ECHO 86"),juce::File{},"*.echo86");
         juce::Component::SafePointer<Echo86Editor> safe(this);
         chooser->launchAsync(juce::FileBrowserComponent::openMode|
               juce::FileBrowserComponent::canSelectFiles,

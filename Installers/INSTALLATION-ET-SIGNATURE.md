@@ -41,11 +41,13 @@ Cette procédure se fait directement dans ton dépôt GitHub. **Ne communique ja
    - `APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64` : contenu base64 du certificat d'installateur
    - `APPLE_P12_PASSWORD` : mot de passe d'export commun aux deux `.p12`
 
-5. Pour la **notarisation Apple**, crée ou utilise une clé API App Store Connect autorisée à soumettre pour notarisation (fichier `.p8`, Key ID et Issuer ID). Ajoute aussi :
+5. Pour la **notarisation Apple (solution la plus simple)**, crée un **mot de passe spécifique à l’application** pour ton identifiant Apple. Utilise ton Team ID Apple Developer et ajoute trois secrets supplémentaires :
 
-   - `APPLE_NOTARY_API_KEY_P8_BASE64` : contenu base64 du fichier `.p8`
-   - `APPLE_NOTARY_KEY_ID` : Key ID de cette clé
-   - `APPLE_NOTARY_ISSUER_ID` : Issuer ID App Store Connect
+   - `APPLE_NOTARY_APPLE_ID` : ton adresse Apple ID
+   - `APPLE_NOTARY_APP_PASSWORD` : ton mot de passe spécifique à l’application (pas ton mot de passe Apple normal)
+   - `APPLE_NOTARY_TEAM_ID` : identifiant de l’équipe Apple Developer (10 caractères)
+
+   Alternative facultative si tu utilises déjà App Store Connect API : `APPLE_NOTARY_API_KEY_P8_BASE64` (contenu base64 du `.p8`), `APPLE_NOTARY_KEY_ID` et `APPLE_NOTARY_ISSUER_ID`. **Ne crée pas les deux méthodes pour rien : l'une suffit.** Le workflow préfère l'authentification par Apple ID si les deux existent.
 
 6. Dans **Actions**, ouvre `ECHO 86 macOS AU VST3`, puis **Run workflow** sur la branche `main`. Le pipeline importe les certificats dans un trousseau éphémère, signe AU/VST3/Standalone avec **Developer ID Application + Hardened Runtime**, signe le `.pkg` avec **Developer ID Installer**, soumet le paquet à Apple, puis ajoute et valide le ticket de notarisation.
 

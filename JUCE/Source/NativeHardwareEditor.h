@@ -299,7 +299,7 @@ public:
         g.fillRoundedRectangle(lcd,2);
         simpleText(g,"PROGRAM "+juce::String(selectedPreset<0?0:selectedPreset+1).paddedLeft('0',3),
                           727,62,245,23,12,juce::Colour(0xff655034));
-        simpleText(g,u8"100 PRESETS D\x27USINE",1046,62,228,23,12,juce::Colour(0xff655034),
+        simpleText(g,u8"100 PRESETS D'USINE",1046,62,228,23,12,juce::Colour(0xff655034),
                    juce::Justification::centredRight);
         const auto display=selectedPreset<0?juce::String("Init"):
                   readablePresetName(echo86::factoryPresets[(size_t)selectedPreset].name);
@@ -327,7 +327,7 @@ public:
             section(g,40,277,750,644,u8"OSCILLATEUR BASSE FRÉQUENCE","LFO");
             section(g,810,277,750,315,u8"ROUTAGES DE MODULATION",u8"CONTRÔLE DIRECT");
             section(g,810,611,750,310,u8"EXPRESSION MIDI",u8"MOLETTE / PRESSION");
-            simpleText(g,u8"FORME D\x27ONDE",65,323,240,19,14,juce::Colour(0xffd5dbc7));
+            simpleText(g,u8"FORME D'ONDE",65,323,240,19,14,juce::Colour(0xffd5dbc7));
             auto r=rect(67,647,694,140);
             g.setColour(juce::Colour(0xff121e21));g.fillRoundedRectangle(r.toFloat(),3);
             g.setColour(juce::Colour(0xff4f6868));g.drawRoundedRectangle(r.toFloat(),3,1);
@@ -338,7 +338,7 @@ public:
                 if(i==0)sine.startNewSubPath(x,y);else sine.lineTo(x,y);
             }
             g.setColour(juce::Colour(0xffd7bd74));g.strokePath(sine,juce::PathStrokeType(2*scaleY()));
-            simpleText(g,u8"FORME D\x27ONDE LFO",82,656,340,22,13,juce::Colour(0xff819b9c));
+            simpleText(g,u8"FORME D'ONDE LFO",82,656,340,22,13,juce::Colour(0xff819b9c));
             break;
           }
           default:
@@ -359,7 +359,7 @@ public:
         g.setColour(juce::Colour(0xff4b6163));
         g.drawLine(39*scaleX(),944*scaleY(),1561*scaleX(),944*scaleY(),1);
         simpleText(g,"LIBERTY / E86",53,966,390,27,16,juce::Colour(0xffb7d1c8));
-        simpleText(g,u8"16 VOIX / 2 DCO / MIDI / 100 PRESETS D\x27USINE",53,1002,1000,17,12,
+        simpleText(g,u8"16 VOIX / 2 DCO / MIDI / 100 PRESETS D'USINE",53,1002,1000,17,12,
                    juce::Colour(0xff91a9a5));
         simpleText(g,u8"VOLUME GÉNÉRAL",1262,969,199,26,14,juce::Colour(0xffd5e0ce),
                     juce::Justification::centredRight);
@@ -519,7 +519,7 @@ private:
                   if(file==juce::File{})return;
                   if(!file.replaceWithText(juce::JSON::toString(safe->serializePreset(),true)))
                      juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
-                                                            "ECHO 86",juce::String::fromUTF8(u8"Impossible d\x27exporter le préréglage"));
+                                                            "ECHO 86",juce::String::fromUTF8(u8"Impossible d'exporter le préréglage"));
                 });
     }
     void importPreset(){

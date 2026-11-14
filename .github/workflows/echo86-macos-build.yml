@@ -1,6 +1,7 @@
 name: ECHO 86 macOS AU VST3
 on:
   workflow_dispatch:
+  # Notarisation Apple : exécution automatique après configuration des secrets du dépôt.
   push:
     branches: [main]
     paths:

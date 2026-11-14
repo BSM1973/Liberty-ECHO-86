@@ -36,15 +36,61 @@ jobs:
               exit 1
             }
           done
-      - name: Upload unsigned plugins
+      - name: Package signed ad-hoc macOS bundles without losing permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/ECHO86-macOS"
+          mkdir -p "$stage/Components" "$stage/VST3" "$stage/Standalone"
+          for item in "component:Components" "vst3:VST3" "app:Standalone"; do
+            ext="${item%%:*}"
+            folder="${item#*:}"
+            bundle="$(find build -type d -name "*.${ext}" -print -quit)"
+            test -n "$bundle" || { echo "::error::Missing .${ext} bundle"; exit 1; }
+            echo "Signing complete ${ext} bundle: $bundle"
+            /usr/bin/xattr -dr com.apple.quarantine "$bundle" 2>/dev/null || true
+            /usr/bin/codesign --force --deep --sign - "$bundle"
+            /usr/bin/codesign --verify --deep --strict --verbose=2 "$bundle"
+            /usr/bin/ditto "$bundle" "$stage/$folder/$(basename "$bundle")"
+            /usr/bin/codesign --verify --deep --strict --verbose=2 "$stage/$folder/$(basename "$bundle")"
+          done
+          cat > "$stage/INSTALLATION.txt" <<'TEXT'
+          ECHO 86 — macOS Apple Silicon
+          --------------------------------
+          This archive preserves macOS plugin executable permissions, symlinks and local ad-hoc signatures.
+
+          AU: copy "Components/ECHO 86.component" into ~/Library/Audio/Plug-Ins/Components/
+          VST3: copy "VST3/ECHO 86.vst3" into ~/Library/Audio/Plug-Ins/VST3/
+          Standalone: "Standalone/ECHO 86.app"
+
+          macOS may quarantine unsigned downloaded files. After copying, if necessary:
+            xattr -dr com.apple.quarantine "$HOME/Library/Audio/Plug-Ins/Components/ECHO 86.component"
+
+          Close and reopen your DAW to rescan plugins.
+          These bundles use local ad-hoc signing; they are not Apple notarized.
+          TEXT
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$stage" "$GITHUB_WORKSPACE/ECHO86-macOS-bundles.zip"
+          /usr/bin/unzip -tq "$GITHUB_WORKSPACE/ECHO86-macOS-bundles.zip"
+          # Round-trip verification: extracted archives must still pass macOS code-sign checks.
+          mkdir -p "$RUNNER_TEMP/ECHO86-verify"
+          /usr/bin/ditto -x -k "$GITHUB_WORKSPACE/ECHO86-macOS-bundles.zip" "$RUNNER_TEMP/ECHO86-verify"
+          unpacked="$RUNNER_TEMP/ECHO86-verify/ECHO86-macOS"
+          for item in "component:Components" "vst3:VST3" "app:Standalone"; do
+            ext="${item%%:*}"
+            folder="${item#*:}"
+            bundle="$(find "$unpacked/$folder" -type d -name "*.${ext}" -print -quit)"
+            test -n "$bundle" || { echo "::error::Archive is missing .${ext}"; exit 1; }
+            /usr/bin/codesign --verify --deep --strict --verbose=2 "$bundle"
+            echo "Verified extracted ${ext} bundle: $bundle"
+          done
+
+      - name: Upload preserved macOS ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: ECHO86-macOS-unsigned
-          path: |
-            build/**/*.component/**
-            build/**/*.vst3/**
-            build/**/*.app/**
+          name: ECHO86-macOS-preserved
+          path: ECHO86-macOS-bundles.zip
           if-no-files-found: error
+          compression-level: 0
 
   linux-dsp-tests:
     name: Verify DSP on Linux (independent of macOS runner)

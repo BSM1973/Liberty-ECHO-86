@@ -101,13 +101,19 @@ jobs:
               /usr/bin/codesign --force --deep --sign - "$bundle"
             fi
             /usr/bin/codesign --verify --deep --strict --verbose=2 "$bundle"
+            if [[ "$ECHO86_DEVELOPER_ID_READY" == "true" ]]; then
+              /usr/bin/codesign --display --verbose=2 "$bundle" 2>&1 | grep -q "Authority=Developer ID Application:" || {
+                echo "::error::Expected Developer ID Application signature is missing on ${ext}"
+                exit 1
+              }
+            fi
             /usr/bin/ditto "$bundle" "$stage/$folder/$(basename "$bundle")"
             /usr/bin/codesign --verify --deep --strict --verbose=2 "$stage/$folder/$(basename "$bundle")"
           done
           cat > "$stage/INSTALLATION.txt" <<'TEXT'
           ECHO 86 — macOS Apple Silicon
           --------------------------------
-          This archive preserves macOS plugin executable permissions, symlinks and local ad-hoc signatures.
+          This archive preserves macOS plugin executable permissions, symlinks and code signatures.
 
           AU: copy "Components/ECHO 86.component" into ~/Library/Audio/Plug-Ins/Components/
           VST3: copy "VST3/ECHO 86.vst3" into ~/Library/Audio/Plug-Ins/VST3/
@@ -117,7 +123,7 @@ jobs:
             xattr -dr com.apple.quarantine "$HOME/Library/Audio/Plug-Ins/Components/ECHO 86.component"
 
           Close and reopen your DAW to rescan plugins.
-          These bundles use local ad-hoc signing; they are not Apple notarized.
+          For commercial distribution, prefer the separately signed and notarized .pkg installer.
           TEXT
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$stage" "$GITHUB_WORKSPACE/ECHO86-macOS-bundles.zip"
           /usr/bin/unzip -tq "$GITHUB_WORKSPACE/ECHO86-macOS-bundles.zip"

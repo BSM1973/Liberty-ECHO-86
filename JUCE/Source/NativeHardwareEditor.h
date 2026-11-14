@@ -9,6 +9,7 @@
 #include <memory>
 #include <cmath>
 #include <functional>
+#include "PresetBrowser.h"
 
 class Echo86Editor final : public juce::AudioProcessorEditor, private juce::Timer {
     static constexpr std::array<const char*,41> extendedIds={
@@ -102,6 +103,7 @@ class Echo86Editor final : public juce::AudioProcessorEditor, private juce::Time
     std::array<std::unique_ptr<juce::TextButton>,4> tabs;
     std::unique_ptr<juce::TextButton> presetButton,prevButton,initButton,nextButton;
     std::unique_ptr<juce::FileChooser> chooser;
+    std::unique_ptr<Echo86PresetBrowser> presetBrowser;
     int page=0, selectedPreset=-1;
     bool prepared=false;
     static constexpr int W=1600,H=1069;
@@ -196,6 +198,20 @@ public:
         addKnob(3,1414,791,u8"ÉCART VOIX","voiceSpread");
         for(int i=0;i<4;++i)tabs[(size_t)i]->setClickingTogglesState(false);
         addKnob(-1,1510,1001,u8"VOLUME GÉNÉRAL","masterLevel",82,104);
+        // The professional browser is a real, interactive JUCE overlay.
+        // It is created last so the native layout never touches incomplete components.
+        presetBrowser=std::make_unique<Echo86PresetBrowser>(
+            Echo86PresetBrowser::Callbacks {
+                [this](int presetIndex) { loadPreset(presetIndex); },
+                [this](const juce::File& file) { return loadUserPresetFile(file); },
+                [this](const juce::String& name,const juce::String& category) {
+                    return saveUserPreset(name,category);
+                },
+                [this] { exportPreset(); },
+                [this] { if(presetBrowser) presetBrowser->setVisible(false); }
+            });
+        addAndMakeVisible(*presetBrowser);
+        presetBrowser->setVisible(false);
         prepared=true;
         setResizable(true,true);
         if(auto* c=getConstrainer())c->setFixedAspectRatio((double)W/H);
@@ -375,6 +391,7 @@ public:
         for(auto& c:knobs)
             c.slider->setBounds(rect(c.x-c.w/2,c.y-c.h/2,c.w,c.h));
         for(auto& b:switches)b.button->setBounds(rect(b.x,b.y,b.w,b.h));
+        if(presetBrowser)presetBrowser->setBounds(getLocalBounds());
     }
 private:
     void addKnob(int pg,int x,int y,const char* name,const char* id,
@@ -466,30 +483,67 @@ private:
         const int count=(int)echo86::factoryPresets.size();
         loadPreset((selectedPreset+count+delta)%count);
     }
+    // Show the integrated professional preset browser, not a tiny popup menu.
     void openPresets(){
-        juce::PopupMenu menu;
-        const char* groups[]={"INIT","BASS","LEAD","PAD","KEYS","PLUCK","ARP","STRINGS","FX"};
-        for(auto* group:groups){
-            juce::PopupMenu sub;
-            const auto prefix=juce::String(group)+" ";
-            for(int i=0;i<(int)echo86::factoryPresets.size();++i){
-                const auto name=readablePresetName(echo86::factoryPresets[(size_t)i].name);
-                if(name.startsWithIgnoreCase(prefix))
-                    sub.addItem(i+1,name,true,i==selectedPreset);
-            }
-            if(sub.getNumItems()>0)menu.addSubMenu(group,sub);
+        if(!presetBrowser)return;
+        presetBrowser->reload();
+        presetBrowser->setBounds(getLocalBounds());
+        presetBrowser->setVisible(true);
+        presetBrowser->toFront(true);
+        presetBrowser->grabKeyboardFocus();
+    }
+
+    bool saveUserPreset(const juce::String& requestedName,const juce::String& category){
+        const auto name=requestedName.trim().substring(0,80);
+        const auto safeName=juce::File::createLegalFileName(name);
+        if(name.isEmpty()||safeName.isEmpty())return false;
+        const auto dir=juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+          .getChildFile("Liberty Music Software").getChildFile("ECHO 86").getChildFile("Presets");
+        if(dir.createDirectory().failed())return false;
+        auto file=dir.getChildFile(safeName+".echo86");
+        if(file.existsAsFile())file=file.getNonexistentSibling();
+        auto data=serializePreset();
+        if(auto* object=data.getDynamicObject()){
+            object->setProperty("name",name);
+            object->setProperty("category",category);
         }
-        menu.addSeparator();
-        menu.addItem(1001,juce::String::fromUTF8(u8"IMPORTER UN PRÉRÉGLAGE..."));
-        menu.addItem(1002,juce::String::fromUTF8(u8"EXPORTER UN PRÉRÉGLAGE..."));
-        juce::Component::SafePointer<Echo86Editor> safe(this);
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(presetButton.get()),
-             [safe](int result){
-                if(safe==nullptr)return;
-                if(result>=1&&result<=100)safe->loadPreset(result-1);
-                else if(result==1001)safe->importPreset();
-                else if(result==1002)safe->exportPreset();
-             });
+        return file.replaceWithText(juce::JSON::toString(data,true));
+    }
+
+    // Validate the full preset before altering the audio processor state.
+    bool loadUserPresetFile(const juce::File& file){
+        if(!file.existsAsFile()||file.getSize()<=0||file.getSize()>65536)return false;
+        const auto data=juce::JSON::parse(file.loadFileAsString());
+        if(!data.isObject()||data.getProperty("format","").toString()!="ECHO86-PRESET"||
+           (int)data.getProperty("version",0)!=1||
+           !data.getProperty("parameters",juce::var()).isObject())return false;
+        const auto values=data.getProperty("parameters",juce::var());
+        auto valid=[&](const char* id,bool mandatory) {
+            const auto v=values.getProperty(id,juce::var());
+            if(!mandatory && v.isVoid())return true;
+            const auto* p=processor.state.getParameter(id);
+            if(p==nullptr||(!v.isDouble()&&!v.isInt())||!std::isfinite((double)v))return false;
+            const float x=(float)(double)v;
+            return x>=p->convertFrom0to1(0.f) && x<=p->convertFrom0to1(1.f);
+        };
+        for(const auto* id:echo86::parameterIds)if(!valid(id,true))return false;
+        for(const auto* id:extendedIds)if(!valid(id,false))return false;
+        for(const auto* id:echo86::parameterIds)
+            setParameter(id,(float)(double)values.getProperty(id,juce::var()));
+        for(const auto* id:extendedIds){
+            const auto v=values.getProperty(id,juce::var());
+            if(v.isVoid()){
+                if(auto* p=processor.state.getParameter(id)){
+                    p->beginChangeGesture();
+                    p->setValueNotifyingHost(p->getDefaultValue());
+                    p->endChangeGesture();
+                }
+            }else setParameter(id,(float)(double)v);
+        }
+        selectedPreset=-1;
+        refreshSwitches();
+        repaint();
+        return true;
     }
     juce::var serializePreset()const{
         auto* root=new juce::DynamicObject();

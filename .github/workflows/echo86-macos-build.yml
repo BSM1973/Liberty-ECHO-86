@@ -6,6 +6,7 @@ on:
     paths:
       - "JUCE/**"
       - ".github/workflows/echo86-macos-build.yml"
+      - "Installers/macOS/**"
 jobs:
   macos:
     runs-on: macos-26
@@ -36,7 +37,51 @@ jobs:
               exit 1
             }
           done
-      - name: Package signed ad-hoc macOS bundles without losing permissions
+      - name: Prepare Apple Developer ID (optional; never request secrets in logs)
+        shell: bash
+        env:
+          APP_P12_B64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64 }}
+          INSTALLER_P12_B64: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          count=0
+          if [[ -n "$APP_P12_B64" ]]; then count=$((count+1)); fi
+          if [[ -n "$INSTALLER_P12_B64" ]]; then count=$((count+1)); fi
+          if [[ -n "$P12_PASSWORD" ]]; then count=$((count+1)); fi
+          if [[ "$count" -eq 0 ]]; then
+            echo "ECHO86_DEVELOPER_ID_READY=false" >> "$GITHUB_ENV"
+            echo "::notice::Developer ID secrets not yet configured: unsigned test installer will be built."
+            exit 0
+          fi
+          if [[ "$count" -ne 3 ]]; then
+            echo "::error::Add all three Apple certificate secrets, or none."
+            exit 1
+          fi
+          keychain="$RUNNER_TEMP/echo86-signing.keychain-db"
+          password="$(uuidgen)"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security default-keychain -s "$keychain"
+          printf "%s" "$APP_P12_B64" | base64 -D > "$RUNNER_TEMP/echo86-app.p12"
+          printf "%s" "$INSTALLER_P12_B64" | base64 -D > "$RUNNER_TEMP/echo86-installer.p12"
+          security import "$RUNNER_TEMP/echo86-app.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security import "$RUNNER_TEMP/echo86-installer.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/pkgbuild -T /usr/bin/productbuild
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain"
+          app_identity="$(security find-identity -v -p codesigning "$keychain" | awk -F '"' '/Developer ID Application/{print $2; exit}')"
+          installer_identity="$(security find-identity -v "$keychain" | awk -F '"' '/Developer ID Installer/{print $2; exit}')"
+          if [[ -z "$app_identity" || -z "$installer_identity" ]]; then
+            echo "::error::Developer ID Application and Developer ID Installer identities must both be present."
+            exit 1
+          fi
+          echo "ECHO86_APP_IDENTITY=$app_identity" >> "$GITHUB_ENV"
+          echo "ECHO86_INSTALLER_IDENTITY=$installer_identity" >> "$GITHUB_ENV"
+          echo "ECHO86_DEVELOPER_ID_READY=true" >> "$GITHUB_ENV"
+          echo "::notice::Developer ID certificates imported; binaries and .pkg will be signed."
+          rm -f "$RUNNER_TEMP/echo86-app.p12" "$RUNNER_TEMP/echo86-installer.p12"
+      - name: Package macOS bundles without losing permissions
         shell: bash
         run: |
           set -euo pipefail
@@ -49,7 +94,12 @@ jobs:
             test -n "$bundle" || { echo "::error::Missing .${ext} bundle"; exit 1; }
             echo "Signing complete ${ext} bundle: $bundle"
             /usr/bin/xattr -dr com.apple.quarantine "$bundle" 2>/dev/null || true
-            /usr/bin/codesign --force --deep --sign - "$bundle"
+            if [[ "$ECHO86_DEVELOPER_ID_READY" == "true" ]]; then
+              /usr/bin/codesign --force --deep --options runtime --timestamp \
+                --sign "$ECHO86_APP_IDENTITY" "$bundle"
+            else
+              /usr/bin/codesign --force --deep --sign - "$bundle"
+            fi
             /usr/bin/codesign --verify --deep --strict --verbose=2 "$bundle"
             /usr/bin/ditto "$bundle" "$stage/$folder/$(basename "$bundle")"
             /usr/bin/codesign --verify --deep --strict --verbose=2 "$stage/$folder/$(basename "$bundle")"
@@ -84,6 +134,40 @@ jobs:
             echo "Verified extracted ${ext} bundle: $bundle"
           done
 
+      - name: Build macOS one-click installer and optionally notarize
+        shell: bash
+        env:
+          APPLE_NOTARY_API_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_API_KEY_P8_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: bash Installers/macOS/package.sh
+
+      - name: Upload unsigned macOS test installer (.pkg)
+        if: env.ECHO86_DEVELOPER_ID_READY != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECHO86-macOS-Installer-TEST-unsigned
+          path: ECHO86-macOS-Installer.pkg
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload signed but unnotarized macOS installer (.pkg)
+        if: env.ECHO86_DEVELOPER_ID_READY == 'true' && env.ECHO86_NOTARIZED != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECHO86-macOS-Installer-DeveloperID
+          path: ECHO86-macOS-Installer.pkg
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload Apple signed and notarized macOS installer (.pkg)
+        if: env.ECHO86_NOTARIZED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECHO86-macOS-Installer-SIGNED-NOTARIZED
+          path: ECHO86-macOS-Installer.pkg
+          if-no-files-found: error
+          compression-level: 0
       - name: Upload preserved macOS ZIP
         uses: actions/upload-artifact@v4
         with:

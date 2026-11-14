@@ -10,12 +10,11 @@
 #include <cmath>
 #include <functional>
 #include "PresetBrowser.h"
+#include "FactoryPresetExtras.h"
 #include "LfoWaveform.h"
 
 class Echo86Editor final : public juce::AudioProcessorEditor, private juce::Timer {
-    static constexpr std::array<const char*,43> extendedIds={
-      "osc1Wave","osc2Wave","osc1Oct","osc1Semi","osc1Fine","osc2Oct","osc2Semi","osc2Fine","osc1Level","osc2Level","noiseLevel","noiseColour","keyTrack","velocityToFilter","filterDrive","masterLevel","lfoWave","lfoPitch","lfoDelay","lfoPwm1","lfoPwm2","envPitch2","crossMod","chorusEnabled","chorusWidth","monoMode","portamento","transpose","masterTune","velocityResponse","bendRange","wheelVibrato","wheelFilter","pressureFilter","vintageAge","voiceSpread","ampBreak","ampDecay2","filterBreak","filterDecay2","filterRelease","lfoFilterDepth","filterAudioFM"
-    };
+    static constexpr auto extendedIds = echo86::factoryExtendedIds;
     class HardwareLook final : public juce::LookAndFeel_V4 {
     public:
         void drawRotarySlider(juce::Graphics& g,int x,int y,int w,int h,float pos,
@@ -601,15 +600,12 @@ private:
     void loadPreset(int index){
         if(index<0||index>=(int)echo86::factoryPresets.size())return;
         const auto& preset=echo86::factoryPresets[(size_t)index];
-        for(const auto* id:extendedIds){
-            if(auto* p=processor.state.getParameter(id)){
-                p->beginChangeGesture();
-                p->setValueNotifyingHost(p->getDefaultValue());
-                p->endChangeGesture();
-            }
-        }
+        const auto& extra=echo86::factoryExtendedPresets[(size_t)index];
+        jassert(juce::String::fromUTF8(preset.name)==juce::String::fromUTF8(extra.name));
         for(size_t i=0;i<echo86::parameterIds.size();++i)
             setParameter(echo86::parameterIds[i],preset.values[i]);
+        for(size_t i=0;i<extendedIds.size();++i)
+            setParameter(extendedIds[i],extra.values[i]);
         selectedPreset=index;refreshSwitches();repaint();
     }
     void nextPreset(int delta){

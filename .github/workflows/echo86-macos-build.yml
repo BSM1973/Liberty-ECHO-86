@@ -54,12 +54,12 @@ jobs:
     steps:
       - name: Checkout ECHO 86
         uses: actions/checkout@v4
-      - name: Compile and execute seven C++ DSP tests
+      - name: Compile and execute all C++ DSP and LFO tests
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p /tmp/echo86-tests
-          for test in test_core test_midi_v43 test_polyphony16_v44 test_advanced_v45 test_effects_v46 test_presets_v47 test_100_presets_v48 test_native_ui_dsp; do
+          for test in test_core test_midi_v43 test_polyphony16_v44 test_advanced_v45 test_effects_v46 test_presets_v47 test_100_presets_v48 test_native_ui_dsp test_lfo_waveform; do
             echo "::group::${test}"
             c++ -std=c++17 -O2 "JUCE/Source/${test}.cpp" -o "/tmp/echo86-tests/${test}"
             "/tmp/echo86-tests/${test}"

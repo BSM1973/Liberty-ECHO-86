@@ -11,6 +11,7 @@
 #include <functional>
 #include "PresetBrowser.h"
 #include "FactoryPresetExtras.h"
+#include "UILocalization.h"
 #include "LfoWaveform.h"
 
 class Echo86Editor final : public juce::AudioProcessorEditor, private juce::Timer {
@@ -92,7 +93,7 @@ class Echo86Editor final : public juce::AudioProcessorEditor, private juce::Time
     };
     struct Switch {
         int page,x,y,w,h;
-        juce::String id;
+        juce::String id,title;
         float value;
         std::unique_ptr<juce::TextButton> button;
     };
@@ -101,10 +102,11 @@ class Echo86Editor final : public juce::AudioProcessorEditor, private juce::Time
     std::vector<Knob> knobs;
     std::vector<Switch> switches;
     std::array<std::unique_ptr<juce::TextButton>,4> tabs;
-    std::unique_ptr<juce::TextButton> presetButton,prevButton,initButton,nextButton;
+    std::unique_ptr<juce::TextButton> presetButton,prevButton,initButton,nextButton,languageButton;
     std::unique_ptr<juce::FileChooser> chooser;
     std::unique_ptr<Echo86PresetBrowser> presetBrowser;
     int page=0, selectedPreset=-1;
+    echo86::locale::Language language=readLanguage();
     bool prepared=false;
     double lfoPreviewPhase=0.0,lastPreviewTimeMs=0.0;
     static constexpr int W=1600,H=1069;
@@ -128,6 +130,7 @@ public:
         top(prevButton,"<",[this]{nextPreset(-1);});
         top(initButton,"INIT",[this]{loadPreset(0);});
         top(nextButton,">",[this]{nextPreset(1);});
+        top(languageButton,u8"LANGUE : FR",[this]{showLanguageMenu();});
 
         // VOICE — original dual oscillator / mixer / analog filter arrangement
         const char* modes[]={"SAW","SQUARE","PULSE","TRIANGLE","SINE","SAW + PW"};
@@ -213,6 +216,7 @@ public:
             });
         addAndMakeVisible(*presetBrowser);
         presetBrowser->setVisible(false);
+        refreshLanguage();
         prepared=true;
         setResizable(true,true);
         if(auto* c=getConstrainer())c->setFixedAspectRatio((double)W/H);
@@ -224,12 +228,59 @@ public:
     ~Echo86Editor()override{
         stopTimer();
         for(auto& b:tabs)b->setLookAndFeel(nullptr);
-        for(auto* b:{presetButton.get(),prevButton.get(),initButton.get(),nextButton.get()})
+        for(auto* b:{presetButton.get(),prevButton.get(),initButton.get(),nextButton.get(),languageButton.get()})
             if(b)b->setLookAndFeel(nullptr);
         for(auto& c:knobs)c.slider->setLookAndFeel(nullptr);
         for(auto& b:switches)b.button->setLookAndFeel(nullptr);
     }
 private:
+    static juce::File languageFile(){
+        return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+          .getChildFile("Liberty Music Software").getChildFile("ECHO 86")
+          .getChildFile("language.txt");
+    }
+    static echo86::locale::Language readLanguage(){
+        const auto file=languageFile();
+        if(!file.existsAsFile())return echo86::locale::Language::fr;
+        const auto code=file.loadFileAsString().trim().toUpperCase();
+        return echo86::locale::parse(code.toRawUTF8());
+    }
+    juce::String tr(const juce::String& key)const{
+        return juce::String::fromUTF8(echo86::locale::translate(language,key.toRawUTF8()));
+    }
+    juce::String tr(const char* key)const{
+        return juce::String::fromUTF8(echo86::locale::translate(language,key));
+    }
+    void refreshLanguage(){
+        const char* names[]={u8"01  VOIX",u8"02  ENVELOPPES","03  MODULATION",u8"04  PERFORMANCE / FX"};
+        for(int i=0;i<4;++i)tabs[(size_t)i]->setButtonText(tr(names[i]));
+        presetButton->setButtonText(tr("PRESETS"));
+        languageButton->setButtonText(tr("LANGUE")+" : "+echo86::locale::code(language));
+        for(auto& item:switches)item.button->setButtonText(tr(item.title));
+        for(auto& item:knobs)item.slider->setTooltip(tr(item.name));
+        if(presetBrowser)presetBrowser->setLanguage(language);
+        repaint();
+    }
+    void showLanguageMenu(){
+        juce::PopupMenu menu;
+        menu.addItem(1,juce::String::fromUTF8(u8"Français"),true,
+                     language==echo86::locale::Language::fr);
+        menu.addItem(2,"English",true,language==echo86::locale::Language::en);
+        menu.addItem(3,juce::String::fromUTF8(u8"Español"),true,
+                     language==echo86::locale::Language::es);
+        menu.addItem(4,"Deutsch",true,language==echo86::locale::Language::de);
+        menu.addItem(5,"Italiano",true,language==echo86::locale::Language::it);
+        juce::Component::SafePointer<Echo86Editor> safe(this);
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(languageButton.get()),
+          [safe](int choice){
+            if(safe==nullptr || choice<1 || choice>5)return;
+            safe->language=static_cast<echo86::locale::Language>(choice-1);
+            safe->refreshLanguage();
+            auto file=languageFile();
+            if(file.getParentDirectory().createDirectory().wasOk())
+                file.replaceWithText(echo86::locale::code(safe->language));
+          });
+    }
     float scaleX()const{return (float)getWidth()/W;}
     float scaleY()const{return (float)getHeight()/H;}
     juce::Rectangle<int> rect(int x,int y,int w,int h)const{
@@ -246,11 +297,11 @@ private:
         g.setColour(juce::Colour(0xff526666));g.drawRoundedRectangle(r,4,1.35f);
         g.setColour(juce::Colour(0xffd6dcca));
         g.setFont(juce::Font(juce::FontOptions(16*scaleY()).withStyle("Bold")));
-        g.drawText(title,rect(x+20,y+16,w-40,22),juce::Justification::centredLeft);
+        g.drawText(tr(title),rect(x+20,y+16,w-40,22),juce::Justification::centredLeft);
         if(hint.isNotEmpty()){
             g.setColour(juce::Colour(0xff748e91));
             g.setFont(juce::Font(juce::FontOptions(10*scaleY())));
-            g.drawText(hint,rect(x+20,y+16,w-40,22),juce::Justification::centredRight);
+            g.drawText(tr(hint),rect(x+20,y+16,w-40,22),juce::Justification::centredRight);
         }
         g.setColour(juce::Colour(0xff3d5355));g.drawLine((x+18)*scaleX(),(y+48)*scaleY(),
                             (x+w-18)*scaleX(),(y+48)*scaleY(),1);
@@ -268,7 +319,7 @@ private:
     void simpleText(juce::Graphics& g,const juce::String& msg,int x,int y,int w,int h,
                      float size,juce::Colour color,juce::Justification just=juce::Justification::centredLeft){
         g.setColour(color);g.setFont(juce::Font(juce::FontOptions(size*scaleY())));
-        g.drawFittedText(msg,rect(x,y,w,h),just,1,.78f);
+        g.drawFittedText(tr(msg),rect(x,y,w,h),just,1,.78f);
     }
     // Live APVTS envelope preview. SynthCore uses exponential responses; the
     // displayed stage times are compressed to keep both fast and slow sounds legible.
@@ -383,7 +434,7 @@ public:
         g.setGradientFill(juce::ColourGradient(juce::Colour(0xffefbd58),lcd.getX(),lcd.getY(),
                          juce::Colour(0xffb98436),lcd.getX(),lcd.getBottom(),false));
         g.fillRoundedRectangle(lcd,2);
-        simpleText(g,"PROGRAM "+juce::String(selectedPreset<0?0:selectedPreset+1).paddedLeft('0',3),
+        simpleText(g,tr("PROGRAM")+" "+juce::String(selectedPreset<0?0:selectedPreset+1).paddedLeft('0',3),
                           727,62,245,23,12,juce::Colour(0xff655034));
         simpleText(g,u8"100 PRESETS D'USINE",1046,62,228,23,12,juce::Colour(0xff655034),
                    juce::Justification::centredRight);
@@ -452,7 +503,7 @@ public:
             g.strokePath(live,juce::PathStrokeType(2.4f*scaleY()));
             g.restoreState();
             const char* waveNames[]={"SINUS","TRIANGLE","CARRÉ","S & H"};
-            simpleText(g,juce::String::fromUTF8(waveNames[wave])+
+            simpleText(g,tr(waveNames[wave])+
                        " / "+juce::String(rate,2)+" Hz / "+
                        juce::String(juce::roundToInt(depth*100.f))+" %",
                        438,654,297,21,12,juce::Colour(0xffdbcaa1),
@@ -491,6 +542,7 @@ public:
         prevButton->setBounds(rect(1330,101,66,47));
         initButton->setBounds(rect(1404,101,82,47));
         nextButton->setBounds(rect(1494,101,66,47));
+        languageButton->setBounds(rect(1330,155,231,30));
         for(auto& c:knobs)
             c.slider->setBounds(rect(c.x-c.w/2,c.y-c.h/2,c.w,c.h));
         for(auto& b:switches)b.button->setBounds(rect(b.x,b.y,b.w,b.h));
@@ -540,8 +592,8 @@ private:
     void addSwitch(int pg,int x,int y,int w,int h,const char* title,
                    const char* id,float value){
         Switch s;
-        s.page=pg;s.x=x;s.y=y;s.w=w;s.h=h;s.id=id;s.value=value;
-        s.button=std::make_unique<juce::TextButton>(juce::String::fromUTF8(title));
+        s.page=pg;s.x=x;s.y=y;s.w=w;s.h=h;s.id=id;s.value=value;s.title=juce::String::fromUTF8(title);
+        s.button=std::make_unique<juce::TextButton>(tr(s.title));
         s.button->setLookAndFeel(&look);
         s.button->onClick=[this,parameter=juce::String(id),value]{
             setParameter(parameter,value);

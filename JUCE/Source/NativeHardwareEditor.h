@@ -195,7 +195,7 @@ public:
         addKnob(3,1122,791,"VINTAGE AGE","vintageAge");
         addKnob(3,1414,791,"VOICE SPREAD","voiceSpread");
         for(int i=0;i<4;++i)tabs[(size_t)i]->setClickingTogglesState(false);
-        addKnob(-1,1510,989,"MASTER OUTPUT","masterLevel",82,104);
+        addKnob(-1,1510,1001,"MASTER OUTPUT","masterLevel",82,104);
         prepared=true;
         setResizable(true,true);
         if(auto* c=getConstrainer())c->setFixedAspectRatio((double)W/H);

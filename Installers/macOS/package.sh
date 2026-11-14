@@ -51,24 +51,43 @@ fi
 
 # Optional Apple notarization (never mark an ad-hoc signed package as notarized).
 if [[ "$ECHO86_DEVELOPER_ID_READY" == "true" ]]; then
-  count=0
-  if [[ -n "$APPLE_NOTARY_API_KEY_P8_BASE64" ]]; then count=$((count+1)); fi
-  if [[ -n "$APPLE_NOTARY_KEY_ID" ]]; then count=$((count+1)); fi
-  if [[ -n "$APPLE_NOTARY_ISSUER_ID" ]]; then count=$((count+1)); fi
-  if [[ "$count" -ne 0 && "$count" -ne 3 ]]; then
-    echo "::error::Notarization needs all 3 APPLE_NOTARY_* secrets (or none)."
+  # Prefer the simpler Apple ID + app-specific password, if configured.
+  # App Store Connect API keys are still supported as an alternative.
+  id_count=0
+  if [[ -n "$APPLE_NOTARY_APPLE_ID" ]]; then id_count=$((id_count+1)); fi
+  if [[ -n "$APPLE_NOTARY_APP_PASSWORD" ]]; then id_count=$((id_count+1)); fi
+  if [[ -n "$APPLE_NOTARY_TEAM_ID" ]]; then id_count=$((id_count+1)); fi
+  api_count=0
+  if [[ -n "$APPLE_NOTARY_API_KEY_P8_BASE64" ]]; then api_count=$((api_count+1)); fi
+  if [[ -n "$APPLE_NOTARY_KEY_ID" ]]; then api_count=$((api_count+1)); fi
+  if [[ -n "$APPLE_NOTARY_ISSUER_ID" ]]; then api_count=$((api_count+1)); fi
+  if [[ "$id_count" -ne 0 && "$id_count" -ne 3 ]]; then
+    echo "::error::Apple ID notarization requires APPLE_NOTARY_APPLE_ID, APPLE_NOTARY_APP_PASSWORD and APPLE_NOTARY_TEAM_ID."
     exit 1
   fi
-  if [[ "$count" -eq 3 ]]; then
-    key="$RUNNER_TEMP/AuthKey_ECHO86.p8"
-    printf %s "$APPLE_NOTARY_API_KEY_P8_BASE64" | base64 -D > "$key"
-    chmod 600 "$key"
+  if [[ "$api_count" -ne 0 && "$api_count" -ne 3 ]]; then
+    echo "::error::API-key notarization requires APPLE_NOTARY_API_KEY_P8_BASE64, APPLE_NOTARY_KEY_ID and APPLE_NOTARY_ISSUER_ID."
+    exit 1
+  fi
+
+  if [[ "$id_count" -eq 3 || "$api_count" -eq 3 ]]; then
     echo "Submitting ECHO 86 installer to Apple notarization service..."
-    xcrun notarytool submit "$package" \
-      --key "$key" \
-      --key-id "$APPLE_NOTARY_KEY_ID" \
-      --issuer "$APPLE_NOTARY_ISSUER_ID" \
-      --wait --output-format json > "$RUNNER_TEMP/echo86-notarization.json"
+    if [[ "$id_count" -eq 3 ]]; then
+      xcrun notarytool submit "$package" \
+        --apple-id "$APPLE_NOTARY_APPLE_ID" \
+        --password "$APPLE_NOTARY_APP_PASSWORD" \
+        --team-id "$APPLE_NOTARY_TEAM_ID" \
+        --wait --output-format json > "$RUNNER_TEMP/echo86-notarization.json"
+    else
+      key="$RUNNER_TEMP/AuthKey_ECHO86.p8"
+      printf %s "$APPLE_NOTARY_API_KEY_P8_BASE64" | base64 -D > "$key"
+      chmod 600 "$key"
+      xcrun notarytool submit "$package" \
+        --key "$key" \
+        --key-id "$APPLE_NOTARY_KEY_ID" \
+        --issuer "$APPLE_NOTARY_ISSUER_ID" \
+        --wait --output-format json > "$RUNNER_TEMP/echo86-notarization.json"
+    fi
     /usr/bin/python3 -c 'import json,sys; x=json.load(open(sys.argv[1])); print("Notary status:",x.get("status")); sys.exit(0 if x.get("status")=="Accepted" else 1)' \
        "$RUNNER_TEMP/echo86-notarization.json"
     xcrun stapler staple "$package"

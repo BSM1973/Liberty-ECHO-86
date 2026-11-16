@@ -1,0 +1,188 @@
+name: LIBERTY RELEASE CENTER
+
+on:
+  workflow_dispatch:
+    inputs:
+      plugin:
+        description: "Choisir le plugin Liberty"
+        type: choice
+        required: true
+        default: pedal-legends
+        options:
+          - pedal-legends
+          - echo-86
+      version:
+        description: "Version (vide = version du catalogue)"
+        type: string
+        required: false
+        default: ""
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/liberty-release-center.yml"
+      - "ReleaseCenter/**"
+
+permissions:
+  contents: read
+
+jobs:
+  select:
+    name: Choose an approved Liberty product
+    runs-on: ubuntu-24.04
+    outputs:
+      slug: ${{ steps.metadata.outputs.slug }}
+      repository: ${{ steps.metadata.outputs.repository }}
+      product_name: ${{ steps.metadata.outputs.product_name }}
+      source_dir: ${{ steps.metadata.outputs.source_dir }}
+      target: ${{ steps.metadata.outputs.target }}
+      version: ${{ steps.metadata.outputs.version }}
+      juce_checkout: ${{ steps.metadata.outputs.juce_checkout }}
+      standalone: ${{ steps.metadata.outputs.standalone }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Resolve Liberty plugin (first push tests PEDAL LEGENDS)
+        id: metadata
+        env:
+          LIBERTY_PLUGIN: ${{ inputs.plugin || 'pedal-legends' }}
+          LIBERTY_VERSION: ${{ inputs.version || '' }}
+        run: python3 ReleaseCenter/resolve.py
+
+  mac-build:
+    name: Build macOS universal AU and VST3 (NO Apple secrets)
+    runs-on: macos-15
+    needs: select
+    steps:
+      - name: Checkout Release Center scripts
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout selected public Liberty plugin
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.select.outputs.repository }}
+          ref: main
+          path: plugin-src
+          persist-credentials: false
+      - name: Checkout JUCE 8 for ECHO 86
+        if: needs.select.outputs.juce_checkout == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: juce-framework/JUCE
+          ref: 8.0.10
+          path: .juce-sdk
+          persist-credentials: false
+      - name: Configure ECHO 86 universal
+        if: needs.select.outputs.juce_checkout == 'true'
+        run: cmake -S "plugin-src/${{ needs.select.outputs.source_dir }}" -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DJUCE_DIR="$GITHUB_WORKSPACE/.juce-sdk" -DBUILD_TESTING=ON
+      - name: Configure standard JUCE plugin universal
+        if: needs.select.outputs.juce_checkout != 'true'
+        run: cmake -S "plugin-src/${{ needs.select.outputs.source_dir }}" -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DPEDAL_LEGENDS_BUILD_PLUGIN=ON -DPEDAL_LEGENDS_BUILD_TESTS=ON
+      - name: Build and test
+        run: |
+          cmake --build build --config Release --parallel 3
+          ctest --test-dir build -C Release --output-on-failure
+      - name: Preserve native macOS bundles with ditto ZIP
+        env:
+          LIBERTY_PRODUCT_NAME: ${{ needs.select.outputs.product_name }}
+          LIBERTY_TARGET: ${{ needs.select.outputs.target }}
+        run: bash ReleaseCenter/macos/preserve.sh
+      - name: Upload unsigned plugin bundles for isolated signing
+        uses: actions/upload-artifact@v4
+        with:
+          name: liberty-unsigned-macos-bundles
+          path: exported-mac/*.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  sign-notarize:
+    name: Apple Developer ID sign + notarize + staple (.pkg)
+    needs: [select, mac-build]
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download validated compiled binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: liberty-unsigned-macos-bundles
+          path: incoming
+      - name: Apple Developer ID signing and notarization
+        env:
+          LIBERTY_PRODUCT_NAME: ${{ needs.select.outputs.product_name }}
+          LIBERTY_SLUG: ${{ needs.select.outputs.slug }}
+          LIBERTY_VERSION: ${{ needs.select.outputs.version }}
+          APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64 }}
+          APPLE_P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
+          APPLE_NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
+        run: bash ReleaseCenter/macos/sign_notarize.sh
+      - name: Publish only Apple-Accepted signed installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: LIBERTY-${{ needs.select.outputs.slug }}-macOS-SIGNED-NOTARIZED
+          path: release-output/*.pkg
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 60
+
+  windows-build:
+    name: Windows x64 VST3 installer (.exe, unsigned)
+    needs: select
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout selected public Liberty plugin
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.select.outputs.repository }}
+          ref: main
+          path: plugin-src
+          persist-credentials: false
+      - name: Checkout JUCE 8 for ECHO 86
+        if: needs.select.outputs.juce_checkout == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: juce-framework/JUCE
+          ref: 8.0.10
+          path: .juce-sdk
+          persist-credentials: false
+      - name: Configure ECHO 86 x64
+        if: needs.select.outputs.juce_checkout == 'true'
+        shell: pwsh
+        run: cmake -S "plugin-src/${{ needs.select.outputs.source_dir }}" -B build -G "Visual Studio 17 2022" -A x64 "-DJUCE_DIR=$env:GITHUB_WORKSPACE/.juce-sdk" -DBUILD_TESTING=ON
+      - name: Configure standard JUCE plugin x64
+        if: needs.select.outputs.juce_checkout != 'true'
+        shell: pwsh
+        run: cmake -S "plugin-src/${{ needs.select.outputs.source_dir }}" -B build -G "Visual Studio 17 2022" -A x64 -DPEDAL_LEGENDS_BUILD_PLUGIN=ON -DPEDAL_LEGENDS_BUILD_TESTS=ON
+      - name: Build and test
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --parallel 3
+          if ($LASTEXITCODE -ne 0) { throw "Windows compilation failed" }
+          ctest --test-dir build -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "Windows tests failed" }
+      - name: Package Inno Setup VST3 installer
+        shell: pwsh
+        env:
+          LIBERTY_PRODUCT_NAME: ${{ needs.select.outputs.product_name }}
+          LIBERTY_TARGET: ${{ needs.select.outputs.target }}
+          LIBERTY_SLUG: ${{ needs.select.outputs.slug }}
+          LIBERTY_VERSION: ${{ needs.select.outputs.version }}
+          LIBERTY_STANDALONE: ${{ needs.select.outputs.standalone }}
+        run: ./ReleaseCenter/windows/build.ps1
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: LIBERTY-${{ needs.select.outputs.slug }}-Windows-x64-EXE-UNSIGNED
+          path: release-output/*.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 60

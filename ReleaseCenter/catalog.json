@@ -1,0 +1,20 @@
+{
+  "pedal-legends": {
+    "repository": "BSM1973/Liberty-Pedal-Legends",
+    "product_name": "PEDAL LEGENDS",
+    "cmake_source": ".",
+    "target": "PedalLegends",
+    "version": "0.6.1",
+    "juce_checkout": false,
+    "standalone": false
+  },
+  "echo-86": {
+    "repository": "BSM1973/Liberty-ECHO-86",
+    "product_name": "ECHO 86",
+    "cmake_source": "JUCE",
+    "target": "ECHO86",
+    "version": "0.1.0",
+    "juce_checkout": true,
+    "standalone": true
+  }
+}

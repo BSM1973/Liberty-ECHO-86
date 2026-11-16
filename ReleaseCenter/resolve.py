@@ -9,7 +9,7 @@ import os
 import re
 from pathlib import Path
 
-root = Path(__file__).resolve().parents[1]
+root = Path(__file__).resolve().parent
 catalog = json.loads((root / "catalog.json").read_text(encoding="utf-8"))
 slug = os.environ.get("LIBERTY_PLUGIN", "pedal-legends").strip() or "pedal-legends"
 override = os.environ.get("LIBERTY_VERSION", "").strip()

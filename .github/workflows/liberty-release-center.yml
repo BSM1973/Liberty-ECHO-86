@@ -43,6 +43,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Check approved catalog and Apple notarization gates (no secrets)
+        run: |
+          set -euo pipefail
+          python3 ReleaseCenter/tests/test_release_center.py
+          bash -n ReleaseCenter/macos/preserve.sh
+          bash -n ReleaseCenter/macos/sign_notarize.sh
       - name: Resolve approved Liberty plugin (push releases ORGANIX)
         id: metadata
         env:

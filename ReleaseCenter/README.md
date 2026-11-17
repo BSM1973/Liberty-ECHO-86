@@ -33,8 +33,9 @@ validation des commandes `stapler`, `spctl` et `pkgutil`.
 - ORGANIX → dépôt `BSM1973/Liberty-Organix`, version 1.3.5,
   AU/VST3 macOS universel (Apple Silicon + Intel), MIDI Learn. Le Release Center
   compile et notarie ORGANIX **avec les secrets déjà fonctionnels d'ECHO 86**.
-  Pour ORGANIX, le job Windows est désactivé jusqu'à validation d'un
-  installateur Windows natif.
+  Pour ORGANIX, la chaîne Windows 64 bits compile et teste le VST3,
+  puis produit un installateur Inno Setup EXE. Le téléchargement est
+  automatiquement contrôlé par SHA256.
 
 ## Les 20 prochains plugins
 
@@ -73,3 +74,18 @@ commercial `SIGNED-NOTARIZED`.
 Pour les versions suivantes, l'entrée `organix` est sélectionnable dans
 le même menu central. Aucun fichier de certificats ou mot de passe ne doit
 être ajouté au dépôt ni envoyé dans la conversation.
+
+## ORGANIX Windows 64 bits
+
+En sélectionnant `organix` dans le Release Center, le même lancement construit
+désormais **deux livrables** :
+
+- macOS : `LIBERTY-organix-macOS-SIGNED-NOTARIZED`, PKG universel AU+VST3,
+  signé avec les certificats Apple déjà présents dans le centre.
+- Windows : `LIBERTY-organix-Windows-x64-EXE-UNSIGNED`, installateur Inno Setup
+  pour VST3 64 bits avec désinstalleur. Le job compile les tests et effectue une
+  vérification du fichier EXE publié avec SHA256 après téléchargement.
+
+L'installateur Windows **n'a pas de signature Authenticode** : Windows peut
+afficher un avertissement SmartScreen. Les vérifications de compilation et de
+packaging ne remplacent pas un essai réel dans un DAW sur Windows.

@@ -16,5 +16,14 @@
     "version": "0.1.0",
     "juce_checkout": true,
     "standalone": true
+  },
+  "organix": {
+    "repository": "BSM1973/Liberty-Organix",
+    "product_name": "Organix",
+    "cmake_source": ".",
+    "target": "Organix",
+    "version": "1.3.5",
+    "juce_checkout": false,
+    "standalone": false
   }
 }

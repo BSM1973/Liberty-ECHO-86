@@ -150,7 +150,6 @@ jobs:
   windows-build:
     name: Windows x64 VST3 installer (.exe, unsigned)
     needs: select
-    if: needs.select.outputs.slug != 'organix'
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -175,8 +174,14 @@ jobs:
         if: needs.select.outputs.juce_checkout == 'true'
         shell: pwsh
         run: cmake -S "plugin-src/${{ needs.select.outputs.source_dir }}" -B build -G "Visual Studio 17 2022" -A x64 "-DJUCE_DIR=$env:GITHUB_WORKSPACE/.juce-sdk" -DBUILD_TESTING=ON
+      - name: Configure Organix Windows x64 VST3 + integration tests
+        if: needs.select.outputs.slug == 'organix'
+        shell: pwsh
+        run: |
+          cmake -S plugin-src -B build -G "Visual Studio 17 2022" -A x64 -DORGANIX_BUILD_PLUGIN=ON -DBUILD_TESTING=ON
+          if ($LASTEXITCODE -ne 0) { throw "Organix Windows CMake configure failed" }
       - name: Configure standard JUCE plugin x64
-        if: needs.select.outputs.juce_checkout != 'true'
+        if: needs.select.outputs.juce_checkout != 'true' && needs.select.outputs.slug != 'organix'
         shell: pwsh
         run: cmake -S "plugin-src/${{ needs.select.outputs.source_dir }}" -B build -G "Visual Studio 17 2022" -A x64 -DPEDAL_LEGENDS_BUILD_PLUGIN=ON -DPEDAL_LEGENDS_BUILD_TESTS=ON
       - name: Build and test
@@ -196,6 +201,7 @@ jobs:
           LIBERTY_STANDALONE: ${{ needs.select.outputs.standalone }}
         run: ./ReleaseCenter/windows/build.ps1
       - name: Upload installer
+        id: windowsInstaller
         uses: actions/upload-artifact@v4
         with:
           name: LIBERTY-${{ needs.select.outputs.slug }}-Windows-x64-EXE-UNSIGNED
@@ -203,3 +209,28 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 60
+      - name: Download the actual published Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.windowsInstaller.outputs.artifact-id }}
+          path: verified-windows-installer
+          merge-multiple: true
+      - name: RELEASE GATE — verify downloaded Windows installer EXE
+        shell: pwsh
+        env:
+          LIBERTY_SLUG: ${{ needs.select.outputs.slug }}
+          LIBERTY_VERSION: ${{ needs.select.outputs.version }}
+        run: |
+          $name="LIBERTY-$env:LIBERTY_SLUG-Windows-x64-v$env:LIBERTY_VERSION-UNSIGNED.exe"
+          $path=Join-Path "verified-windows-installer" $name
+          if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw "Published installer missing: $name" }
+          if ((Get-Item -LiteralPath $path).Length -lt 100000) { throw "Windows installer unexpectedly small" }
+          $source=Join-Path "release-output" $name
+          $srcHash=(Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+          $dlHash=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+          if ($srcHash -ne $dlHash) { throw "Published installer hash mismatch" }
+          Write-Host "PASS: downloaded Windows EXE exists and SHA256 matches build output"
+          "### Windows x64 VST3 installer verified" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          "Artifact: $name" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          "SHA256: $dlHash" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          "Note: Windows EXE is unsigned (no Authenticode yet)." | Out-File -Append $env:GITHUB_STEP_SUMMARY

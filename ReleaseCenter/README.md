@@ -8,7 +8,7 @@ Il n'est donc pas nécessaire de les copier dans chaque dépôt Liberty.
 
 1. GitHub → dépôt **Liberty-ECHO-86** → **Actions**.
 2. Choisir **LIBERTY RELEASE CENTER**, puis **Run workflow**.
-3. Sélectionner `pedal-legends` ou `echo-86`.
+3. Sélectionner `pedal-legends`, `echo-86` ou `organix`.
 4. Laisser le champ Version vide pour la version enregistrée.
 5. Cliquer sur **Run workflow**. Les compilations macOS et Windows démarrent.
 
@@ -30,6 +30,11 @@ validation des commandes `stapler`, `spctl` et `pkgutil`.
   80 pédales et 400 presets, AU/VST3 Mac et VST3 Windows.
 - ECHO 86 → dépôt `BSM1973/Liberty-ECHO-86`, version 0.1.0,
   AU/VST3 Mac et VST3 + Standalone Windows.
+- ORGANIX → dépôt `BSM1973/Liberty-Organix`, version 1.3.5,
+  AU/VST3 macOS universel (Apple Silicon + Intel), MIDI Learn. Le Release Center
+  compile et notarie ORGANIX **avec les secrets déjà fonctionnels d'ECHO 86**.
+  Pour ORGANIX, le job Windows est désactivé jusqu'à validation d'un
+  installateur Windows natif.
 
 ## Les 20 prochains plugins
 
@@ -54,3 +59,17 @@ et notarie. Ne jamais utiliser ce système pour signer du code non fiable.
 Les packages restent à **installer et tester dans Ableton Live, Logic et
 autres DAW** avant livraison commerciale. Le packaging ne valide pas, à lui
 seul, le comportement audio du plugin ou toutes les configurations système.
+
+## ORGANIX : automatisation sans recopie des secrets
+
+Lors de l'intégration initiale d'ORGANIX, une modification vérifiée du catalogue
+sur `main` déclenche directement le Release Center pour **ORGANIX**.
+Le build, la signature, la soumission Apple et le `.pkg` sont réalisés
+dans la même chaîne, sans configurer de secrets dans le dépôt ORGANIX.
+Le succès est conditionné à `notarytool: Accepted`, `stapler`, Gatekeeper
+et vérification des signatures. Si une étape échoue, il n'y a pas d'Artifact
+commercial `SIGNED-NOTARIZED`.
+
+Pour les versions suivantes, l'entrée `organix` est sélectionnable dans
+le même menu central. Aucun fichier de certificats ou mot de passe ne doit
+être ajouté au dépôt ni envoyé dans la conversation.

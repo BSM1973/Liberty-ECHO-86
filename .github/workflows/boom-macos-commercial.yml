@@ -1,0 +1,116 @@
+name: BOOM - Liberty Release Center Apple Signed PKG
+run-name: Sign and notarize BOOM from approved pinned source
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/boom-macos-commercial.yml'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: liberty-release-center-boom
+  cancel-in-progress: false
+jobs:
+  mac-build:
+    name: Verified BOOM Universal AU VST3 build (NO Apple credentials)
+    runs-on: macos-15
+    timeout-minutes: 100
+    steps:
+      - name: Checkout trusted Liberty Release Center
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout audited BOOM release source pinned to GitHub commit
+        uses: actions/checkout@v4
+        with:
+          repository: BSM1973/Liberty-BOOM
+          ref: 4ad21320963b6ce10274a15b3a84a8e6efb5f520
+          path: plugin-src
+          persist-credentials: false
+      - name: Configure universal BOOM AU and VST3
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S plugin-src -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DBUILD_TESTING=ON
+      - name: Compile BOOM native formats and run CTest
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build --config Release --parallel 3
+          ctest --test-dir build -C Release --output-on-failure
+      - name: Preserve both Universal AU and VST3 plugins with existing Release Center process
+        env:
+          LIBERTY_PRODUCT_NAME: BOOM
+          LIBERTY_TARGET: BOOM
+        run: bash ReleaseCenter/macos/preserve.sh
+      - name: Transfer unsigned native bundles to isolated signing job
+        uses: actions/upload-artifact@v4
+        with:
+          name: boom-release-unsigned-mac-bundles
+          path: exported-mac/*.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  apple-sign-and-notarize:
+    name: Developer ID sign, Apple Accepted, stapled BOOM installer
+    needs: mac-build
+    runs-on: macos-15
+    timeout-minutes: 100
+    steps:
+      - name: Checkout trusted Release Center scripts only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download prevalidated BOOM native binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: boom-release-unsigned-mac-bundles
+          path: incoming
+      - name: Apple Developer ID signature and notarization using Release Center certificates
+        env:
+          LIBERTY_PRODUCT_NAME: BOOM
+          LIBERTY_SLUG: boom
+          LIBERTY_VERSION: 0.5.0
+          APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64 }}
+          APPLE_P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
+          APPLE_NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
+        run: bash ReleaseCenter/macos/sign_notarize.sh
+      - name: Publish only Apple Accepted signed installer
+        id: published
+        uses: actions/upload-artifact@v4
+        with:
+          name: LIBERTY-boom-macOS-SIGNED-NOTARIZED
+          path: release-output/LIBERTY-boom-macOS-Universal-v0.5.0-SIGNED-NOTARIZED.pkg
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+      - name: Redownload actual published BOOM package
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.published.outputs.artifact-id }}
+          path: verified-commercial
+          merge-multiple: true
+      - name: Verify signed and stapled BOOM package after download
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg="verified-commercial/LIBERTY-boom-macOS-Universal-v0.5.0-SIGNED-NOTARIZED.pkg"
+          test -s "$pkg"
+          /usr/sbin/pkgutil --check-signature "$pkg"
+          /usr/bin/xcrun stapler validate "$pkg"
+          /usr/sbin/spctl --assess --type install --verbose=2 "$pkg"
+          /usr/bin/shasum -a 256 "$pkg"
+      - name: Publish commercial release download
+        env:
+          ARTIFACT_ID: ${{ steps.published.outputs.artifact-id }}
+        shell: bash
+        run: |
+          echo "## BOOM macOS Universal AU + VST3 - Apple Signed & Notarized" >> "$GITHUB_STEP_SUMMARY"
+          echo "Apple Notary Service: **Accepted**, Developer ID signed, staple verified, Gatekeeper assessed." >> "$GITHUB_STEP_SUMMARY"
+          echo "[Commercial installer](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts/$ARTIFACT_ID)" >> "$GITHUB_STEP_SUMMARY"

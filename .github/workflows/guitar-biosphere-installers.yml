@@ -1,0 +1,230 @@
+name: GUITAR BIOSPHERE — Liberty Release Center two installers
+run-name: Guitar Biosphere 0.5.0 — Apple notarized PKG and Windows VST3 EXE
+
+# Uses the same trusted ReleaseCenter Apple certificates as Organix and BOOM.
+# Source pinned to the audited, CI-green Guitar Biosphere commit with enlarged,
+# clean-footer editor. Builds run without Apple secrets; only validated binary
+# bundles cross into the isolated signing job. No commercial QA approval inferred.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/guitar-biosphere-installers.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: liberty-guitar-biosphere-notarized-installers
+  cancel-in-progress: false
+
+env:
+  BIOSPHERE_SOURCE_SHA: 477046337b5eaf4aa5783667dd336231b03497ca
+  BIOSPHERE_VERSION: '0.5.0'
+
+jobs:
+  mac-build:
+    name: Build Guitar Biosphere macOS Universal AU and VST3 (without secrets)
+    runs-on: macos-15
+    timeout-minutes: 100
+    steps:
+      - name: Checkout the trusted Liberty Release Center
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout pinned Guitar Biosphere source
+        uses: actions/checkout@v4
+        with:
+          repository: BSM1973/Liberty-Guitar-Biosphere
+          ref: ${{ env.BIOSPHERE_SOURCE_SHA }}
+          path: plugin-src
+          persist-credentials: false
+      - name: Validate exact pinned source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C plugin-src rev-parse HEAD)" = "$BIOSPHERE_SOURCE_SHA"
+          grep -Fq 'project(LibertyGuitarBiosphere VERSION 0.5.0' plugin-src/CMakeLists.txt
+          grep -Fq 'Empty footer by design' plugin-src/Source/PluginEditor.cpp
+          grep -Fq 'constexpr int editorWidth = 1284' plugin-src/Source/PluginEditor.cpp
+      - name: Configure universal macOS plugin
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S plugin-src -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DBUILD_TESTING=ON
+      - name: Compile AU/VST3 and run native DSP, MIDI Learn, and preset tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build --config Release --parallel 3
+          ctest --test-dir build -C Release --output-on-failure
+          python3 plugin-src/Tests/verify_utf8.py
+          python3 plugin-src/Tests/verify_phase10.py
+      - name: Validate Audio Unit with Apple auval
+        shell: bash
+        run: |
+          set -euo pipefail
+          source="build/GuitarBiosphere_artefacts/Release/AU/Guitar Biosphere.component"
+          target="$HOME/Library/Audio/Plug-Ins/Components/Guitar Biosphere.component"
+          mkdir -p "$(dirname "$target")"
+          /usr/bin/ditto "$source" "$target"
+          /usr/bin/codesign --force --deep --sign - "$target"
+          /usr/bin/codesign --verify --deep "$target"
+          killall -9 AudioComponentRegistrar >/dev/null 2>&1 || true
+          sleep 4
+          /usr/bin/auval -v aumf GBio Lbms
+      - name: Validate real VST3 with pluginval
+        uses: Tracktion/pluginval/validate@286684f72062250fd2494681b7ebdcb721f09e0d
+        with:
+          pluginval-version: v2.0.0-beta3
+          plugins: |
+            build/GuitarBiosphere_artefacts/Release/VST3/*.vst3
+          strictness-level: '5'
+          args: '--skip-gui-tests --timeout-ms 120000'
+      - name: Preserve universal AU and VST3 using Release Center
+        shell: bash
+        env:
+          LIBERTY_PRODUCT_NAME: Guitar Biosphere
+          LIBERTY_TARGET: GuitarBiosphere
+        run: bash ReleaseCenter/macos/preserve.sh
+      - name: Transfer only compiled bundles into the isolated Apple signing job
+        uses: actions/upload-artifact@v4
+        with:
+          name: guitar-biosphere-unsigned-validated-bundles
+          path: exported-mac/*.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  apple-sign-notarize:
+    name: Developer ID signed, Apple Accepted and stapled PKG
+    needs: mac-build
+    runs-on: macos-15
+    timeout-minutes: 100
+    steps:
+      - name: Checkout only the trusted Release Center scripts
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download compiled validated AU and VST3
+        uses: actions/download-artifact@v4
+        with:
+          name: guitar-biosphere-unsigned-validated-bundles
+          path: incoming
+      - name: Reuse Organix/BOOM Apple Developer ID and notarization automation
+        shell: bash
+        env:
+          LIBERTY_PRODUCT_NAME: Guitar Biosphere
+          LIBERTY_SLUG: guitar-biosphere
+          LIBERTY_VERSION: '0.5.0'
+          APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64 }}
+          APPLE_P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
+          APPLE_NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
+        run: bash ReleaseCenter/macos/sign_notarize.sh
+      - name: Publish only Apple-Accepted and stapled test installer
+        id: pkg
+        uses: actions/upload-artifact@v4
+        with:
+          name: LIBERTY-guitar-biosphere-macOS-SIGNED-NOTARIZED-QA
+          path: release-output/LIBERTY-guitar-biosphere-macOS-Universal-v0.5.0-SIGNED-NOTARIZED.pkg
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+      - name: Re-download published PKG and check Gatekeeper and stapled ticket
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.pkg.outputs.artifact-id }}
+          path: verified-mac
+          merge-multiple: true
+      - name: Verify exact Apple signed installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg=verified-mac/LIBERTY-guitar-biosphere-macOS-Universal-v0.5.0-SIGNED-NOTARIZED.pkg
+          test -s "$pkg"
+          /usr/sbin/pkgutil --check-signature "$pkg"
+          /usr/bin/xcrun stapler validate "$pkg"
+          /usr/sbin/spctl --assess --type install --verbose=2 "$pkg"
+          shasum -a 256 "$pkg" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  windows-build:
+    name: Build Windows x64 VST3 and Inno Setup EXE (unsigned)
+    runs-on: windows-2022
+    timeout-minutes: 100
+    steps:
+      - name: Checkout the trusted Liberty Release Center
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout same pinned Guitar Biosphere source
+        uses: actions/checkout@v4
+        with:
+          repository: BSM1973/Liberty-Guitar-Biosphere
+          ref: ${{ env.BIOSPHERE_SOURCE_SHA }}
+          path: plugin-src
+          persist-credentials: false
+      - name: Verify correct source revision and plugin version
+        shell: pwsh
+        run: |
+          $sha = git -C plugin-src rev-parse HEAD
+          if ($sha -ne $env:BIOSPHERE_SOURCE_SHA) { throw "Wrong release commit" }
+          if (!(Select-String -LiteralPath plugin-src/CMakeLists.txt -Pattern 'project\(LibertyGuitarBiosphere VERSION 0\.5\.0')) { throw 'Wrong source version' }
+      - name: Compile Windows VST3 and run native tests
+        shell: pwsh
+        run: |
+          cmake -S plugin-src -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON
+          if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
+          cmake --build build --config Release --parallel 3
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+          ctest --test-dir build -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+          python plugin-src/Tests/verify_utf8.py
+          if ($LASTEXITCODE -ne 0) { throw 'UTF-8 validation failed' }
+      - name: Validate Windows VST3 using pluginval
+        uses: Tracktion/pluginval/validate@286684f72062250fd2494681b7ebdcb721f09e0d
+        with:
+          pluginval-version: v2.0.0-beta3
+          plugins: |
+            build/GuitarBiosphere_artefacts/Release/VST3/*.vst3
+          strictness-level: '5'
+          args: '--skip-gui-tests --timeout-ms 120000'
+      - name: Build .exe through the existing Release Center Inno Setup installer
+        shell: pwsh
+        env:
+          LIBERTY_PRODUCT_NAME: Guitar Biosphere
+          LIBERTY_TARGET: GuitarBiosphere
+          LIBERTY_SLUG: guitar-biosphere
+          LIBERTY_VERSION: '0.5.0'
+          LIBERTY_STANDALONE: 'false'
+        run: ./ReleaseCenter/windows/build.ps1
+      - name: Publish Windows VST3 Setup.exe (not Authenticode signed)
+        id: published
+        uses: actions/upload-artifact@v4
+        with:
+          name: LIBERTY-guitar-biosphere-Windows-x64-EXE-UNSIGNED-QA
+          path: release-output/LIBERTY-guitar-biosphere-Windows-x64-v0.5.0-UNSIGNED.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+      - name: Download actual published Windows EXE
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.published.outputs.artifact-id }}
+          path: verified-windows
+          merge-multiple: true
+      - name: Compare uploaded installer SHA256 with compiled source
+        shell: pwsh
+        run: |
+          $name='LIBERTY-guitar-biosphere-Windows-x64-v0.5.0-UNSIGNED.exe'
+          $src=Join-Path release-output $name
+          $dst=Join-Path verified-windows $name
+          if (!(Test-Path -LiteralPath $dst)) { throw 'Published installer missing' }
+          $srcHash=(Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash
+          $dstHash=(Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash
+          if ($srcHash -ne $dstHash) { throw 'Published Windows EXE hash mismatch' }
+          "Windows installer SHA256: $dstHash" | Out-File -Append $env:GITHUB_STEP_SUMMARY

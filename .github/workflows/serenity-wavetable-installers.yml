@@ -24,6 +24,7 @@ env:
 
 jobs:
   mac-build:
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[verify-existing]')
     name: Build Serenity WAVETABLE macOS Universal AU and VST3 (without secrets)
     runs-on: macos-15
     timeout-minutes: 120
@@ -131,24 +132,38 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 90
-      - name: Re-download published PKG and check Gatekeeper and stapled ticket
-        uses: actions/download-artifact@v4
-        with:
-          artifact-ids: ${{ steps.pkg.outputs.artifact-id }}
-          path: verified-mac
-          merge-multiple: true
+      - name: Re-download published PKG with bounded retry
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.pkg.outputs.artifact-id }}
+        run: |
+          set -euo pipefail
+          mkdir -p verified-mac
+          for delay in 0 5 10 20 40 60; do
+            sleep "$delay"
+            rm -f verified-mac.zip
+            if gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > verified-mac.zip && unzip -tq verified-mac.zip; then
+              unzip -o verified-mac.zip -d verified-mac
+              exit 0
+            fi
+          done
+          echo "::error::Published artifact still unavailable after retry"
+          exit 1
       - name: Verify exact Apple signed installer
         shell: bash
         run: |
           set -euo pipefail
           pkg=verified-mac/LIBERTY-serenity-wavetable-macOS-Universal-v1.2.12-SIGNED-NOTARIZED.pkg
           test -s "$pkg"
+          cmp "$pkg" "release-output/$(basename "$pkg")"
           /usr/sbin/pkgutil --check-signature "$pkg"
           /usr/bin/xcrun stapler validate "$pkg"
           /usr/sbin/spctl --assess --type install --verbose=2 "$pkg"
           shasum -a 256 "$pkg" | tee -a "$GITHUB_STEP_SUMMARY"
 
   windows-build:
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[verify-existing]')
     name: Build Windows x64 VST3/Standalone and Inno Setup EXE (unsigned)
     runs-on: windows-2022
     timeout-minutes: 120
@@ -222,3 +237,61 @@ jobs:
           $dstHash=(Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash
           if ($srcHash -ne $dstHash) { throw 'Published Windows EXE hash mismatch' }
           "Windows installer SHA256: $dstHash" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+
+  verify-existing-installers:
+    name: Verify previously signed and published Serenity 1.2.12 installers (no rebuild)
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-existing]')
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Fetch original published ZIPs by immutable artifact ID and verify logged archive digests
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p verified-mac verified-windows
+          fetch() {
+            local id="$1" digest="$2" file="$3" dest="$4"
+            for delay in 0 5 10 20 40 60; do
+              sleep "$delay"
+              rm -f "$file"
+              if gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "$file" && unzip -tq "$file"; then
+                printf '%s  %s\n' "$digest" "$file" | shasum -a 256 -c -
+                unzip -o "$file" -d "$dest"
+                return 0
+              fi
+            done
+            return 1
+          }
+          fetch 14913372823 ae804c138319c8b9f316625f3d9f532414abaf41f10383a3d7f077a1127da7f3 mac.zip verified-mac
+          fetch 14914640688 728f3ffcf20fd6928827125004375dd838b6db680afd2e5cf776292b9710c219 win.zip verified-windows
+      - name: Verify exact downloaded Apple notarized package and Windows installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg=verified-mac/LIBERTY-serenity-wavetable-macOS-Universal-v1.2.12-SIGNED-NOTARIZED.pkg
+          exe=verified-windows/LIBERTY-serenity-wavetable-Windows-x64-v1.2.12-UNSIGNED.exe
+          test -s "$pkg"
+          test -s "$exe"
+          /usr/sbin/pkgutil --check-signature "$pkg"
+          /usr/bin/xcrun stapler validate "$pkg"
+          /usr/sbin/spctl --assess --type install --verbose=2 "$pkg"
+          file "$exe" | grep -E 'PE32'
+          shasum -a 256 "$pkg" "$exe" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Republish verified Apple installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: LIBERTY-serenity-wavetable-macOS-SIGNED-NOTARIZED-VERIFIED
+          path: verified-mac/*.pkg
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+      - name: Republish verified Windows installer (unsigned)
+        uses: actions/upload-artifact@v4
+        with:
+          name: LIBERTY-serenity-wavetable-Windows-x64-EXE-UNSIGNED-VERIFIED
+          path: verified-windows/*.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90

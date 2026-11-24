@@ -1,0 +1,129 @@
+name: FreeSpirit Delay - Liberty Release Center Apple Notarized Installer
+run-name: FreeSpirit Delay 0.2.1 - Apple Developer ID signed and notarized
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/freespirit-delay-macos-notarized.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: liberty-release-center-freespirit-delay
+  cancel-in-progress: false
+env:
+  FREESPIRIT_DELAY_SOURCE_SHA: 'faf06fb0c99d2915df7e3118462e31db1c8b5ea7'
+  FREESPIRIT_DELAY_VERSION: '0.2.1'
+jobs:
+  mac-build:
+    name: Compile pinned FreeSpirit Delay AU/VST3 and validate without Apple secrets
+    runs-on: macos-15
+    timeout-minutes: 100
+    steps:
+      - name: Checkout trusted Liberty Release Center
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout exact FreeSpirit Delay source commit
+        uses: actions/checkout@v4
+        with:
+          repository: BSM1973/Liberty-FreeSpirit-Delay
+          ref: ${{ env.FREESPIRIT_DELAY_SOURCE_SHA }}
+          path: plugin-src
+          persist-credentials: false
+      - name: Verify immutable release source and UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C plugin-src rev-parse HEAD)" = "$FREESPIRIT_DELAY_SOURCE_SHA"
+          grep -Fq 'project(FreeSpiritDelay VERSION 0.2.1' plugin-src/CMakeLists.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path("plugin-src/Source/Editor.cpp").read_text(encoding="ascii")
+          for label in ("Save as...", "Rename...", "Delete...", "Import...", "Export...", "Search name or category..."):
+              assert ('"' + label + '"') in text, label
+          assert '...' in text
+          PY
+          bash -n ReleaseCenter/macos/preserve.sh
+          bash -n ReleaseCenter/macos/sign_notarize.sh
+      - name: Configure macOS Universal x86_64 + arm64
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S plugin-src -B build -G Xcode \
+            '-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64' \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DCMAKE_BUILD_TYPE=Release
+      - name: Compile AU/VST3 and all unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build --config Release --parallel 3
+          ctest --test-dir build -C Release --output-on-failure
+      - name: Preserve FreeSpirit Delay AU/VST3 in signed-safe archives
+        shell: bash
+        env:
+          LIBERTY_PRODUCT_NAME: FreeSpirit Delay
+          LIBERTY_TARGET: FreeSpiritDelay
+        run: bash ReleaseCenter/macos/preserve.sh
+      - name: Transfer only validated plugin binary bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: freespirit-delay-validated-unsigned-bundles
+          path: exported-mac/*.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+  apple-notarization:
+    name: Sign, Apple notarize, staple and verify FreeSpirit Delay installer
+    needs: mac-build
+    runs-on: macos-15
+    timeout-minutes: 100
+    steps:
+      - name: Checkout trusted existing Liberty Release Center scripts
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download compiled and tested AU/VST3
+        uses: actions/download-artifact@v4
+        with:
+          name: freespirit-delay-validated-unsigned-bundles
+          path: incoming
+      - name: Use previously validated ECHO 86 Apple notarization tool
+        shell: bash
+        env:
+          LIBERTY_PRODUCT_NAME: FreeSpirit Delay
+          LIBERTY_SLUG: freespirit-delay
+          LIBERTY_VERSION: '0.2.1'
+          APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64 }}
+          APPLE_P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
+          APPLE_NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
+        run: bash ReleaseCenter/macos/sign_notarize.sh
+      - name: Publish only Apple Accepted and stapled installer
+        id: published
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeSpirit-Delay-v0.2.1-macOS-SIGNED-NOTARIZED-PKG
+          path: release-output/LIBERTY-freespirit-delay-macOS-Universal-v0.2.1-SIGNED-NOTARIZED.pkg
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+      - name: Redownload actual published PKG
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.published.outputs.artifact-id }}
+          path: verified-macos
+          merge-multiple: true
+      - name: Verify the exact downloadable signed and stapled installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg='verified-macos/LIBERTY-freespirit-delay-macOS-Universal-v0.2.1-SIGNED-NOTARIZED.pkg'
+          test -s "$pkg"
+          /usr/sbin/pkgutil --check-signature "$pkg"
+          /usr/bin/xcrun stapler validate "$pkg"
+          /usr/sbin/spctl --assess --type install --verbose=2 "$pkg"
+          shasum -a 256 "$pkg"

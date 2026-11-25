@@ -80,11 +80,12 @@ jobs:
   sign-notarize:
     name: Apple Developer ID sign + notarize + staple (.pkg)
     needs: [select, mac-build]
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/release-voices-audacity-v1.0-rc1'
+    if: (github.event_name != 'pull_request' && github.ref == 'refs/heads/release-voices-audacity-v1.0-rc1') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'release-voices-audacity-v1.0-rc1' && github.event.pull_request.user.login == 'BSM1973')
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: 871dede378d9dd45ce450f8e9455a4836e182292
           persist-credentials: false
       - name: Download validated compiled binaries
         uses: actions/download-artifact@v4

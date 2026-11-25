@@ -13,7 +13,7 @@ concurrency:
   group: liberty-release-center-voices-audacity
   cancel-in-progress: false
 env:
-  SOURCE_SHA: '1b4d691c89f81c56288331c7a82887964daab63d'
+  SOURCE_SHA: '560540043417b021a34519190143e7477cd98d92'
   LIBERTY_PRODUCT_NAME: Voices Audacity
   LIBERTY_TARGET: VoicesAudacity
   LIBERTY_SLUG: voices-audacity

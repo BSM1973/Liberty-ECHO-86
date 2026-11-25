@@ -1,0 +1,113 @@
+name: Liberty Infinity - Liberty Release Center
+run-name: Liberty Infinity 0.9.6 RC - Apple Silicon Standalone
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/infinity-macos-rc.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: liberty-release-center-infinity
+  cancel-in-progress: false
+env:
+  INFINITY_SHA: '8956aa0088b0bd0a46dc61c1aa5a50ac5c090f09'
+jobs:
+  mac-build:
+    name: Compile pinned ARM64 Standalone and test (no signing secrets)
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: BSM1973/Liberty-Infinity-MPC
+          ref: ${{ env.INFINITY_SHA }}
+          path: infinity-src
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: inmusic-software/mpc-plugin-builder-sdk
+          ref: e78bad508a305a92443758eb2bc8b428e9e7a687
+          path: infinity-src/sdk
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate pinned source, build bank and app
+        working-directory: infinity-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$INFINITY_SHA"
+          python -m pip install pillow numpy
+          python tools/qc_ui.py
+          clang++ -std=c++17 -O2 -pthread -I sdk/framework tests/articulations.cpp -o /tmp/infinity-art-rc
+          /tmp/infinity-art-rc
+          clang++ -std=c++17 -O2 -pthread -I sdk/framework tests/streaming_qc.cpp -o /tmp/infinity-stream-rc
+          /tmp/infinity-stream-rc | tee streaming-60s.csv
+          python tools/generate_samples.py
+          python tools/pack_factory.py
+          python tools/retro_assets.py
+          bash macos/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: infinity-validated-standalone-arm64
+          path: infinity-src/dist/Liberty-Infinity-Black-Gold-Mac-Test-arm64.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+  apple-notarization:
+    name: Sign and notarize Standalone RC PKG
+    needs: mac-build
+    runs-on: macos-15
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: infinity-validated-standalone-arm64
+          path: incoming
+      - name: Sign Developer ID, notarize and staple
+        shell: bash
+        env:
+          LIBERTY_PRODUCT_NAME: Liberty Infinity
+          LIBERTY_SLUG: infinity
+          LIBERTY_VERSION: '0.9.6'
+          APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64 }}
+          APPLE_P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
+          APPLE_NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
+        run: bash ReleaseCenter/macos/sign_notarize_infinity.sh
+      - name: Publish only Apple Accepted RC package
+        id: published
+        uses: actions/upload-artifact@v4
+        with:
+          name: Liberty-Infinity-v0.9.6-macOS-ARM64-RC-SIGNED-NOTARIZED
+          path: release-output/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.published.outputs.artifact-id }}
+          path: verified-macos
+          merge-multiple: true
+      - name: Verify published installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd verified-macos
+          pkg="LIBERTY-Infinity-macOS-ARM64-v0.9.6-RC-SIGNED-NOTARIZED.pkg"
+          test -s "$pkg"
+          shasum -a 256 -c SHA256SUMS.txt
+          /usr/sbin/pkgutil --check-signature "$pkg"
+          /usr/bin/xcrun stapler validate "$pkg"
+          /usr/sbin/spctl --assess --type install --verbose=2 "$pkg"

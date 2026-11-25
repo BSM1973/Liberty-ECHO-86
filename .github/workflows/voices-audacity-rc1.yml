@@ -1,0 +1,194 @@
+name: LIBERTY RELEASE CENTER — VOICES AUDACITY 1.0 RC1
+on:
+  workflow_dispatch:
+  push:
+    branches: [release-voices-audacity-v1.0-rc1]
+    paths:
+      - ".github/workflows/voices-audacity-rc1.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/voices-audacity-rc1.yml"
+permissions:
+  contents: read
+jobs:
+  select:
+    name: Validate pinned candidate metadata (no secrets)
+    runs-on: ubuntu-24.04
+    outputs:
+      slug: voices-audacity
+      repository: BSM1973/Liberty-Voices-Audacity
+      product_name: Voices Audacity
+      target: VoicesAudacity
+      version: 1.0.0
+      standalone: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check existing Release Center gates
+        run: |
+          set -euo pipefail
+          python3 ReleaseCenter/tests/test_release_center.py
+          bash -n ReleaseCenter/macos/preserve.sh
+          bash -n ReleaseCenter/macos/sign_notarize.sh
+  mac-build:
+    name: Build macOS universal AU and VST3 (NO Apple secrets)
+    runs-on: macos-15
+    needs: select
+    steps:
+      - name: Checkout Release Center scripts
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout selected public Liberty plugin
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.select.outputs.repository }}
+          ref: 1b4d691c89f81c56288331c7a82887964daab63d
+          path: plugin-src
+          persist-credentials: false
+      - name: Configure Voices Audacity universal AU and VST3
+        run: cmake -S plugin-src -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+      - name: Build and test
+        run: |
+          cmake --build build --config Release --parallel 3
+          ctest --test-dir build -C Release --output-on-failure
+      - name: Retain macOS QC evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Voices-Audacity-macOS-QC-RC1
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/ui-qc/*.png
+          if-no-files-found: warn
+      - name: Preserve native macOS bundles with ditto ZIP
+        env:
+          LIBERTY_PRODUCT_NAME: ${{ needs.select.outputs.product_name }}
+          LIBERTY_TARGET: ${{ needs.select.outputs.target }}
+        run: bash ReleaseCenter/macos/preserve.sh
+      - name: Upload unsigned plugin bundles for isolated signing
+        uses: actions/upload-artifact@v4
+        with:
+          name: voices-audacity-rc1-unsigned-macos-bundles
+          path: exported-mac/*.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  sign-notarize:
+    name: Apple Developer ID sign + notarize + staple (.pkg)
+    needs: [select, mac-build]
+    if: (github.event_name != 'pull_request' && github.ref == 'refs/heads/release-voices-audacity-v1.0-rc1') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'release-voices-audacity-v1.0-rc1' && github.event.pull_request.user.login == 'BSM1973')
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 871dede378d9dd45ce450f8e9455a4836e182292
+          persist-credentials: false
+      - name: Download validated compiled binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: voices-audacity-rc1-unsigned-macos-bundles
+          path: incoming
+      - name: Apple Developer ID signing and notarization
+        env:
+          LIBERTY_PRODUCT_NAME: ${{ needs.select.outputs.product_name }}
+          LIBERTY_SLUG: ${{ needs.select.outputs.slug }}
+          LIBERTY_VERSION: ${{ needs.select.outputs.version }}
+          APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64 }}
+          APPLE_P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
+          APPLE_NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
+        run: bash ReleaseCenter/macos/sign_notarize.sh
+      - name: Publish only Apple-Accepted signed installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: LIBERTY-${{ needs.select.outputs.slug }}-macOS-SIGNED-NOTARIZED-RC1
+          path: release-output/*.pkg
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 60
+
+  windows-build:
+    name: Windows x64 VST3 installer (.exe, unsigned)
+    needs: select
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout selected public Liberty plugin
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.select.outputs.repository }}
+          ref: 1b4d691c89f81c56288331c7a82887964daab63d
+          path: plugin-src
+          persist-credentials: false
+      - name: Configure Voices Audacity x64
+        shell: pwsh
+        run: |
+          cmake -S plugin-src -B build -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Voices Audacity CMake configure failed" }
+      - name: Build and test
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --parallel 3
+          if ($LASTEXITCODE -ne 0) { throw "Windows compilation failed" }
+          ctest --test-dir build -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "Windows tests failed" }
+      - name: Retain Windows QC evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Voices-Audacity-Windows-QC-RC1
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/ui-qc/*.png
+          if-no-files-found: warn
+      - name: Package Inno Setup VST3 installer
+        shell: pwsh
+        env:
+          LIBERTY_PRODUCT_NAME: ${{ needs.select.outputs.product_name }}
+          LIBERTY_TARGET: ${{ needs.select.outputs.target }}
+          LIBERTY_SLUG: ${{ needs.select.outputs.slug }}
+          LIBERTY_VERSION: ${{ needs.select.outputs.version }}
+          LIBERTY_STANDALONE: ${{ needs.select.outputs.standalone }}
+        run: ./ReleaseCenter/windows/build.ps1
+      - name: Upload installer
+        id: windowsInstaller
+        uses: actions/upload-artifact@v4
+        with:
+          name: LIBERTY-${{ needs.select.outputs.slug }}-Windows-x64-EXE-UNSIGNED-RC1
+          path: release-output/*.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 60
+      - name: Download the actual published Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.windowsInstaller.outputs.artifact-id }}
+          path: verified-windows-installer
+          merge-multiple: true
+      - name: RELEASE GATE — verify downloaded Windows installer EXE
+        shell: pwsh
+        env:
+          LIBERTY_SLUG: ${{ needs.select.outputs.slug }}
+          LIBERTY_VERSION: ${{ needs.select.outputs.version }}
+        run: |
+          $name="LIBERTY-$env:LIBERTY_SLUG-Windows-x64-v$env:LIBERTY_VERSION-UNSIGNED.exe"
+          $path=Join-Path "verified-windows-installer" $name
+          if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw "Published installer missing: $name" }
+          if ((Get-Item -LiteralPath $path).Length -lt 100000) { throw "Windows installer unexpectedly small" }
+          $source=Join-Path "release-output" $name
+          $srcHash=(Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+          $dlHash=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+          if ($srcHash -ne $dlHash) { throw "Published installer hash mismatch" }
+          Write-Host "PASS: downloaded Windows EXE exists and SHA256 matches build output"
+          "### Windows x64 VST3 installer verified" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          "Artifact: $name" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          "SHA256: $dlHash" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          "Note: Windows EXE is unsigned (no Authenticode yet)." | Out-File -Append $env:GITHUB_STEP_SUMMARY

@@ -1,5 +1,5 @@
-name: Unchained Drive - Liberty Release Center v0.8.0
-run-name: Unchained Drive 0.8.0 - pre-commercial candidate
+name: Unchained Drive - Liberty Release Center v1.0.0
+run-name: Unchained Drive 1.0.0 - commercial candidate RC1
 on:
   push:
     branches: [main]
@@ -13,11 +13,11 @@ concurrency:
   group: liberty-release-center-unchained-drive
   cancel-in-progress: false
 env:
-  SOURCE_SHA: 'a537aae0e250c64f9cbc6b20cc2ee1a81264f8a8'
+  SOURCE_SHA: 'dd3fa5d3a93f9886ca57f566ebe48139a511614d'
   LIBERTY_PRODUCT_NAME: Unchained Drive
   LIBERTY_TARGET: UnchainedDrive
   LIBERTY_SLUG: unchained-drive
-  LIBERTY_VERSION: '0.8.0'
+  LIBERTY_VERSION: '1.0.0'
 jobs:
   mac-build:
     name: ARM64 AU/VST3 - full QC without signing secrets
@@ -41,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git -C plugin-src rev-parse HEAD)" = "$SOURCE_SHA"
-          grep -Fq 'project(UnchainedDrive VERSION 0.8.0' plugin-src/CMakeLists.txt
+          grep -Fq 'project(UnchainedDrive VERSION 1.0.0' plugin-src/CMakeLists.txt
           python3 -c 'from pathlib import Path; files=list(Path("plugin-src/Source").glob("*")); assert all(chr(0xfffd) not in p.read_text(encoding="utf-8") for p in files if p.suffix in (".h", ".cpp"))'
       - name: Configure, compile and test
         shell: bash
@@ -69,7 +69,7 @@ jobs:
           done
       - uses: actions/upload-artifact@v4
         with:
-          name: unchained-drive-v0.8.0-validated-unsigned-arm64
+          name: unchained-drive-v1.0.0-validated-unsigned-arm64
           path: exported-mac/*.zip
           if-no-files-found: error
           compression-level: 0
@@ -77,11 +77,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Unchained-Drive-v0.8.0-QC-macOS-ARM64
+          name: Unchained-Drive-v1.0.0-QC-macOS-ARM64
           path: |
             build/Testing/Temporary/LastTest.log
             build/ui-qc/*
-            plugin-src/QC/v0.8-rc.md
+            plugin-src/QC/v1.0-rc1.md
           if-no-files-found: error
   apple-notarization:
     name: Developer ID - Apple Accepted - staple - verify
@@ -95,7 +95,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: unchained-drive-v0.8.0-validated-unsigned-arm64
+          name: unchained-drive-v1.0.0-validated-unsigned-arm64
           path: incoming
       - name: Existing trusted Release Center signing and notarization
         shell: bash
@@ -111,8 +111,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          old="release-output/LIBERTY-unchained-drive-macOS-Universal-v0.8.0-SIGNED-NOTARIZED.pkg"
-          pkg="release-output/LIBERTY-unchained-drive-macOS-ARM64-v0.8.0-SIGNED-NOTARIZED.pkg"
+          old="release-output/LIBERTY-unchained-drive-macOS-Universal-v1.0.0-SIGNED-NOTARIZED.pkg"
+          pkg="release-output/LIBERTY-unchained-drive-macOS-ARM64-v1.0.0-SIGNED-NOTARIZED.pkg"
           test -s "$old"
           mv "$old" "$pkg"
           /usr/sbin/pkgutil --check-signature "$pkg"
@@ -122,21 +122,21 @@ jobs:
       - uses: actions/upload-artifact@v4
         id: published
         with:
-          name: Unchained-Drive-v0.8.0-macOS-ARM64-SIGNED-NOTARIZED-PKG
+          name: Unchained-Drive-v1.0.0-macOS-ARM64-SIGNED-NOTARIZED-PKG
           path: release-output/*.pkg
           if-no-files-found: error
           compression-level: 0
           retention-days: 90
       - uses: actions/download-artifact@v4
         with:
-          artifact-ids: ${{ steps.published.outputs.artifact-id }}
+          name: Unchained-Drive-v1.0.0-macOS-ARM64-SIGNED-NOTARIZED-PKG
           path: verified-macos
           merge-multiple: true
       - name: Verify actual downloadable package
         shell: bash
         run: |
           set -euo pipefail
-          name="LIBERTY-unchained-drive-macOS-ARM64-v0.8.0-SIGNED-NOTARIZED.pkg"
+          name="LIBERTY-unchained-drive-macOS-ARM64-v1.0.0-SIGNED-NOTARIZED.pkg"
           cmp "release-output/$name" "verified-macos/$name"
           /usr/sbin/pkgutil --check-signature "verified-macos/$name"
           /usr/bin/xcrun stapler validate "verified-macos/$name"
@@ -182,20 +182,20 @@ jobs:
       - uses: actions/upload-artifact@v4
         id: published
         with:
-          name: Unchained-Drive-v0.8.0-Windows-x64-EXE-UNSIGNED
+          name: Unchained-Drive-v1.0.0-Windows-x64-EXE-UNSIGNED
           path: release-output/*.exe
           if-no-files-found: error
           compression-level: 0
           retention-days: 90
       - uses: actions/download-artifact@v4
         with:
-          artifact-ids: ${{ steps.published.outputs.artifact-id }}
+          name: Unchained-Drive-v1.0.0-Windows-x64-EXE-UNSIGNED
           path: verified-windows
           merge-multiple: true
       - name: Verify downloaded EXE
         shell: pwsh
         run: |
-          $name="LIBERTY-unchained-drive-Windows-x64-v0.8.0-UNSIGNED.exe"
+          $name="LIBERTY-unchained-drive-Windows-x64-v1.0.0-UNSIGNED.exe"
           $file=Join-Path verified-windows $name
           if (!(Test-Path $file) -or (Get-Item $file).Length -lt 100000) { throw "Installer missing or invalid" }
           if ((Get-FileHash $file -Algorithm SHA256).Hash -ne (Get-FileHash (Join-Path release-output $name) -Algorithm SHA256).Hash) { throw "Hash mismatch" }
@@ -203,11 +203,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Unchained-Drive-v0.8.0-QC-Windows-x64
+          name: Unchained-Drive-v1.0.0-QC-Windows-x64
           path: |
             build/Testing/Temporary/LastTest.log
             build/ui-qc/*
-            plugin-src/QC/v0.8-rc.md
+            plugin-src/QC/v1.0-rc1.md
           if-no-files-found: error
   commercial-archives:
     name: Prepare separate store-ready candidate archives
@@ -216,11 +216,11 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: Unchained-Drive-v0.8.0-macOS-ARM64-SIGNED-NOTARIZED-PKG
+          name: Unchained-Drive-v1.0.0-macOS-ARM64-SIGNED-NOTARIZED-PKG
           path: mac
       - uses: actions/download-artifact@v4
         with:
-          name: Unchained-Drive-v0.8.0-Windows-x64-EXE-UNSIGNED
+          name: Unchained-Drive-v1.0.0-Windows-x64-EXE-UNSIGNED
           path: win
       - uses: actions/checkout@v4
         with:
@@ -234,17 +234,17 @@ jobs:
           set -euo pipefail
           mkdir -p commercial
           for dir in mac win; do
-            cp plugin-src/QC/v0.8-rc.md "$dir/RELEASE-CANDIDATE.md"
+            cp plugin-src/QC/v1.0-rc1.md "$dir/RELEASE-CANDIDATE.md"
             cp plugin-src/Docs/MANUEL-FR.md plugin-src/Docs/MANUAL-EN.md "$dir/"
             (cd "$dir"; sha256sum * > SHA256SUMS.txt)
           done
-          (cd mac; zip -0 -r ../commercial/Unchained-Drive-v0.8.0-macOS-ARM64.zip .)
-          (cd win; zip -0 -r ../commercial/Unchained-Drive-v0.8.0-Windows-x64.zip .)
-          unzip -tq commercial/Unchained-Drive-v0.8.0-macOS-ARM64.zip
-          unzip -tq commercial/Unchained-Drive-v0.8.0-Windows-x64.zip
+          (cd mac; zip -0 -r ../commercial/Unchained-Drive-v1.0.0-macOS-ARM64.zip .)
+          (cd win; zip -0 -r ../commercial/Unchained-Drive-v1.0.0-Windows-x64.zip .)
+          unzip -tq commercial/Unchained-Drive-v1.0.0-macOS-ARM64.zip
+          unzip -tq commercial/Unchained-Drive-v1.0.0-Windows-x64.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: Unchained-Drive-v0.8.0-COMMERCIAL-CANDIDATE-ARCHIVES
+          name: Unchained-Drive-v1.0.0-COMMERCIAL-CANDIDATE-ARCHIVES
           path: commercial/*.zip
           if-no-files-found: error
           compression-level: 0

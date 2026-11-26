@@ -1,0 +1,251 @@
+name: Unchained Drive - Liberty Release Center v0.8.0
+run-name: Unchained Drive 0.8.0 - pre-commercial candidate
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/unchained-drive-commercial.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: liberty-release-center-unchained-drive
+  cancel-in-progress: false
+env:
+  SOURCE_SHA: 'a537aae0e250c64f9cbc6b20cc2ee1a81264f8a8'
+  LIBERTY_PRODUCT_NAME: Unchained Drive
+  LIBERTY_TARGET: UnchainedDrive
+  LIBERTY_SLUG: unchained-drive
+  LIBERTY_VERSION: '0.8.0'
+jobs:
+  mac-build:
+    name: ARM64 AU/VST3 - full QC without signing secrets
+    runs-on: macos-15
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: BSM1973/Liberty-Unchained-Drive
+          ref: ${{ env.SOURCE_SHA }}
+          path: plugin-src
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact source and UTF-8
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C plugin-src rev-parse HEAD)" = "$SOURCE_SHA"
+          grep -Fq 'project(UnchainedDrive VERSION 0.8.0' plugin-src/CMakeLists.txt
+          python3 -c 'from pathlib import Path; files=list(Path("plugin-src/Source").glob("*")); assert all(chr(0xfffd) not in p.read_text(encoding="utf-8") for p in files if p.suffix in (".h", ".cpp"))'
+      - name: Configure, compile and test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S plugin-src -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+          cmake --build build --config Release --parallel 3
+          ctest --test-dir build -C Release --verbose --output-on-failure
+          test -s build/Testing/Temporary/LastTest.log
+      - name: Preserve validated native ARM64 AU and VST3 bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p exported-mac
+          root="build/${LIBERTY_TARGET}_artefacts/Release"
+          for spec in "AU:component:au.zip" "VST3:vst3:vst3.zip"; do
+            IFS=: read -r format ext archive <<< "$spec"
+            bundle="$root/$format/$LIBERTY_PRODUCT_NAME.$ext"
+            test -d "$bundle"
+            binary="$(find "$bundle/Contents/MacOS" -maxdepth 1 -type f -print -quit)"
+            test -n "$binary"
+            test "$(/usr/bin/lipo -archs "$binary")" = arm64
+            /usr/bin/ditto -c -k --keepParent "$bundle" "exported-mac/$archive"
+            /usr/bin/unzip -tq "exported-mac/$archive"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unchained-drive-v0.8.0-validated-unsigned-arm64
+          path: exported-mac/*.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Unchained-Drive-v0.8.0-QC-macOS-ARM64
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/ui-qc/*
+            plugin-src/QC/v0.8-rc.md
+          if-no-files-found: error
+  apple-notarization:
+    name: Developer ID - Apple Accepted - staple - verify
+    needs: mac-build
+    runs-on: macos-15
+    timeout-minutes: 100
+    steps:
+      - name: Checkout trusted Release Center only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: unchained-drive-v0.8.0-validated-unsigned-arm64
+          path: incoming
+      - name: Existing trusted Release Center signing and notarization
+        shell: bash
+        env:
+          APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64 }}
+          APPLE_P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
+          APPLE_NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
+        run: bash ReleaseCenter/macos/sign_notarize.sh
+      - name: Name package accurately and verify notarization
+        shell: bash
+        run: |
+          set -euo pipefail
+          old="release-output/LIBERTY-unchained-drive-macOS-Universal-v0.8.0-SIGNED-NOTARIZED.pkg"
+          pkg="release-output/LIBERTY-unchained-drive-macOS-ARM64-v0.8.0-SIGNED-NOTARIZED.pkg"
+          test -s "$old"
+          mv "$old" "$pkg"
+          /usr/sbin/pkgutil --check-signature "$pkg"
+          /usr/bin/xcrun stapler validate "$pkg"
+          /usr/sbin/spctl --assess --type install --verbose=2 "$pkg"
+          shasum -a 256 "$pkg"
+      - uses: actions/upload-artifact@v4
+        id: published
+        with:
+          name: Unchained-Drive-v0.8.0-macOS-ARM64-SIGNED-NOTARIZED-PKG
+          path: release-output/*.pkg
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.published.outputs.artifact-id }}
+          path: verified-macos
+          merge-multiple: true
+      - name: Verify actual downloadable package
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="LIBERTY-unchained-drive-macOS-ARM64-v0.8.0-SIGNED-NOTARIZED.pkg"
+          cmp "release-output/$name" "verified-macos/$name"
+          /usr/sbin/pkgutil --check-signature "verified-macos/$name"
+          /usr/bin/xcrun stapler validate "verified-macos/$name"
+          /usr/sbin/spctl --assess --type install --verbose=2 "verified-macos/$name"
+  windows-build:
+    name: Windows x64 VST3 + Standalone - QC and unsigned EXE
+    runs-on: windows-2022
+    timeout-minutes: 100
+    env:
+      LIBERTY_STANDALONE: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: BSM1973/Liberty-Unchained-Drive
+          ref: ${{ env.SOURCE_SHA }}
+          path: plugin-src
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify source and UTF-8
+        shell: pwsh
+        run: |
+          if ((git -C plugin-src rev-parse HEAD) -ne $env:SOURCE_SHA) { throw "Wrong source" }
+          python -c 'from pathlib import Path; files=list(Path("plugin-src/Source").glob("*")); assert all(chr(0xfffd) not in p.read_text(encoding="utf-8") for p in files if p.suffix in (".h", ".cpp"))'
+          if ($LASTEXITCODE -ne 0) { throw "UTF-8 validation failed" }
+      - name: Configure build and test
+        shell: pwsh
+        run: |
+          cmake -S plugin-src -B build -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Configure failed" }
+          cmake --build build --config Release --parallel 3
+          if ($LASTEXITCODE -ne 0) { throw "Build failed" }
+          ctest --test-dir build -C Release --verbose --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "QC failed" }
+          if (!(Test-Path build/Testing/Temporary/LastTest.log)) { throw "Missing QC log" }
+      - name: Existing Release Center Inno Setup packaging
+        shell: pwsh
+        run: ./ReleaseCenter/windows/build.ps1
+      - uses: actions/upload-artifact@v4
+        id: published
+        with:
+          name: Unchained-Drive-v0.8.0-Windows-x64-EXE-UNSIGNED
+          path: release-output/*.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.published.outputs.artifact-id }}
+          path: verified-windows
+          merge-multiple: true
+      - name: Verify downloaded EXE
+        shell: pwsh
+        run: |
+          $name="LIBERTY-unchained-drive-Windows-x64-v0.8.0-UNSIGNED.exe"
+          $file=Join-Path verified-windows $name
+          if (!(Test-Path $file) -or (Get-Item $file).Length -lt 100000) { throw "Installer missing or invalid" }
+          if ((Get-FileHash $file -Algorithm SHA256).Hash -ne (Get-FileHash (Join-Path release-output $name) -Algorithm SHA256).Hash) { throw "Hash mismatch" }
+          Get-FileHash $file -Algorithm SHA256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Unchained-Drive-v0.8.0-QC-Windows-x64
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/ui-qc/*
+            plugin-src/QC/v0.8-rc.md
+          if-no-files-found: error
+  commercial-archives:
+    name: Prepare separate store-ready candidate archives
+    needs: [apple-notarization, windows-build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Unchained-Drive-v0.8.0-macOS-ARM64-SIGNED-NOTARIZED-PKG
+          path: mac
+      - uses: actions/download-artifact@v4
+        with:
+          name: Unchained-Drive-v0.8.0-Windows-x64-EXE-UNSIGNED
+          path: win
+      - uses: actions/checkout@v4
+        with:
+          repository: BSM1973/Liberty-Unchained-Drive
+          ref: ${{ env.SOURCE_SHA }}
+          path: plugin-src
+          persist-credentials: false
+      - name: Package installers with QC notes and SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p commercial
+          for dir in mac win; do
+            cp plugin-src/QC/v0.8-rc.md "$dir/RELEASE-CANDIDATE.md"
+            cp plugin-src/Docs/MANUEL-FR.md plugin-src/Docs/MANUAL-EN.md "$dir/"
+            (cd "$dir"; sha256sum * > SHA256SUMS.txt)
+          done
+          (cd mac; zip -0 -r ../commercial/Unchained-Drive-v0.8.0-macOS-ARM64.zip .)
+          (cd win; zip -0 -r ../commercial/Unchained-Drive-v0.8.0-Windows-x64.zip .)
+          unzip -tq commercial/Unchained-Drive-v0.8.0-macOS-ARM64.zip
+          unzip -tq commercial/Unchained-Drive-v0.8.0-Windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Unchained-Drive-v0.8.0-COMMERCIAL-CANDIDATE-ARCHIVES
+          path: commercial/*.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90

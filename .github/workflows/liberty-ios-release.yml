@@ -126,6 +126,21 @@ jobs:
             xcrun clang++ -std=c++17 -O2 -I plugin-src/Source plugin-src/tests/mobile_touch_layout_test.cpp -o /tmp/mobile-touch-layout-test
             /tmp/mobile-touch-layout-test
           fi
+      - name: LOVE EQ native quality gates (no signing secrets)
+        if: needs.resolve.outputs.product == 'love-eq'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report
+          python3 plugin-src/tests/validate_ui_text.py | tee report/ui-text.txt
+          for name in eqcore presets graphic utf8 curvelab harmonic_dna relationship time_lens intent match mobile_precision mobile_touch_layout; do
+            xcrun clang++ -std=c++17 -O2 -I plugin-src/Source "plugin-src/tests/${name}_test.cpp" -o "/tmp/loveeq-${name}-test"
+            "/tmp/loveeq-${name}-test" | tee "report/${name}.txt"
+          done
+          cmake -S plugin-src -B build-native-qc -G Xcode -DCMAKE_OSX_ARCHITECTURES="$(uname -m)" -DLOVE_EQ_PROCESSOR_QC=ON
+          cmake --build build-native-qc --config Release --target loveeq_processor_qc --parallel 3
+          build-native-qc/Release/loveeq_processor_qc | tee report/native-processor.txt
+          printf '%s\n' 'Native processor tests do not qualify iOS hosts, device CPU/memory/energy, or real touch gestures.' > report/QC-scope.txt
       - name: Build unsigned application and AUv3
         shell: bash
         run: |

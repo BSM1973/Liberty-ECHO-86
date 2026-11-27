@@ -1,0 +1,180 @@
+name: LIBERTY RELEASE CENTER - iOS AUv3 and TestFlight
+run-name: Liberty iOS - ${{ inputs.product || 'love-eq' }} - ${{ inputs.mode || 'diagnostic' }}
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/liberty-ios-release.yml'
+      - 'ReleaseCenter/ios/**'
+  workflow_dispatch:
+    inputs:
+      product:
+        description: "Product key registered in ReleaseCenter/ios/catalog.json"
+        type: string
+        required: true
+        default: love-eq
+      mode:
+        description: "Diagnostic, signed IPA export, or signed IPA plus TestFlight upload"
+        type: choice
+        options: [diagnostic, signed-ipa, testflight]
+        default: diagnostic
+        required: true
+      build_number:
+        description: "Unique increasing Apple build number for this product/version"
+        type: string
+        default: "1"
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: liberty-ios-${{ inputs.product || 'love-eq' }}
+  cancel-in-progress: false
+jobs:
+  resolve:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      repo: ${{ steps.product.outputs.repo }}
+      sha: ${{ steps.product.outputs.sha }}
+      product: ${{ steps.product.outputs.product }}
+      target: ${{ steps.product.outputs.target }}
+      version: ${{ steps.product.outputs.version }}
+      bundle: ${{ steps.product.outputs.bundle }}
+      environment: ${{ steps.product.outputs.environment }}
+      minimum_ios: ${{ steps.product.outputs.minimum_ios }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: product
+        name: Resolve trusted pinned product
+        env:
+          PRODUCT: ${{ inputs.product || 'love-eq' }}
+          BUILD_NUMBER: ${{ inputs.build_number || '1' }}
+        run: python3 ReleaseCenter/ios/resolve_product.py
+  diagnostic:
+    name: Compile and verify AUv3 without Apple secrets
+    needs: resolve
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      TARGET: ${{ needs.resolve.outputs.target }}
+      SOURCE_SHA: ${{ needs.resolve.outputs.sha }}
+      MIN_IOS: ${{ needs.resolve.outputs.minimum_ios }}
+      BUNDLE_ID: ${{ needs.resolve.outputs.bundle }}
+      VERSION: ${{ needs.resolve.outputs.version }}
+      BUILD_NUMBER: ${{ inputs.build_number || '1' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.resolve.outputs.repo }}
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+          path: plugin-src
+      - name: Verify source and SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C plugin-src rev-parse HEAD)" = "$SOURCE_SHA"
+          xcodebuild -version
+          sdk=$(xcrun --sdk iphoneos --show-sdk-version)
+          [[ "${sdk%%.*}" -ge 26 ]] || { echo "::error::Select Xcode 26 or newer"; exit 1; }
+          bash -n plugin-src/scripts/ios_testflight.sh
+      - name: Build unsigned application and AUv3
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S plugin-src -B build-ios -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET="$MIN_IOS" \
+            -DLOVE_EQ_IOS_BUILD_VERSION="$BUILD_NUMBER" \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO
+          cmake --build build-ios --config Release --target "${TARGET}_AUv3" "${TARGET}_Standalone" --parallel 3
+      - name: Verify embedded extension and report actual Apple identifiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=$(find "build-ios/${TARGET}_artefacts/Release" -type d -name '*.app' -print -quit)
+          test -n "$app"
+          ext=$(find "$app/PlugIns" -maxdepth 1 -name '*.appex' -print -quit)
+          test -n "$ext"
+          python3 plugin-src/scripts/verify_ios_bundle.py "$app" "$ext"
+          mkdir -p report
+          python3 - "$app" "$ext" "$BUNDLE_ID" "$VERSION" "$BUILD_NUMBER" <<'PY'
+          import pathlib,plistlib,sys
+          app,ext,bundle,version,build=sys.argv[1:]
+          rows=[]
+          for kind,path in (("app",app),("auv3",ext)):
+              with open(pathlib.Path(path)/"Info.plist","rb") as f: p=plistlib.load(f)
+              if kind=="app" and p["CFBundleIdentifier"]!=bundle: raise SystemExit("Unexpected app identifier")
+              if p["CFBundleShortVersionString"]!=version or p["CFBundleVersion"]!=build: raise SystemExit("Unexpected build metadata")
+              rows.append(kind+"="+p["CFBundleIdentifier"]+" version="+version+" build="+build)
+          text="\n".join(rows)+"\n"
+          print(text)
+          pathlib.Path("report/identifiers.txt").write_text(text)
+          PY
+          for bundle in "$app" "$ext"; do
+            exe=$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$bundle/Info.plist")
+            lipo -verify_arch arm64 "$bundle/$exe"
+          done
+          printf '%s\n' "$SOURCE_SHA" > report/source-sha.txt
+          printf '%s\n' 'Unsigned diagnostic; not an installable IPA.' > report/README.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ needs.resolve.outputs.product }}-iOS-diagnostic
+          path: report/
+          if-no-files-found: error
+  distribution:
+    name: Apple Distribution - signed IPA and optional TestFlight
+    needs: [resolve, diagnostic]
+    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'signed-ipa' || inputs.mode == 'testflight')
+    runs-on: macos-15
+    timeout-minutes: 90
+    environment: ${{ needs.resolve.outputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.resolve.outputs.repo }}
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+          path: plugin-src
+      - name: Verify pinned source before signing
+        env:
+          SOURCE_SHA: ${{ needs.resolve.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C plugin-src rev-parse HEAD)" = "$SOURCE_SHA"
+          sdk=$(xcrun --sdk iphoneos --show-sdk-version)
+          [[ "${sdk%%.*}" -ge 26 ]]
+      - name: Archive and export with iOS-only signing secrets
+        working-directory: plugin-src
+        shell: bash
+        env:
+          TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
+          ASC_KEY: ${{ secrets.IOS_ASC_PRIVATE_KEY }}
+          IOS_P12: ${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}
+          IOS_P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
+          IOS_APP_PROFILE: ${{ secrets.IOS_APP_PROFILE_BASE64 }}
+          IOS_AUV3_PROFILE: ${{ secrets.IOS_AUV3_PROFILE_BASE64 }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          UPLOAD: ${{ inputs.mode == 'testflight' }}
+        run: |
+          set -euo pipefail
+          for v in TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY IOS_P12 IOS_P12_PASSWORD IOS_APP_PROFILE IOS_AUV3_PROFILE; do
+            [[ -n "${!v}" ]] || { echo "::error::Missing iOS signing secret: $v"; exit 1; }
+          done
+          bash scripts/ios_testflight.sh
+          cd ios-distribution
+          shasum -a 256 ./*.ipa > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ needs.resolve.outputs.product }}-v${{ needs.resolve.outputs.version }}-build${{ inputs.build_number }}-iOS-signed-IPA
+          path: |
+            plugin-src/ios-distribution/*.ipa
+            plugin-src/ios-distribution/build-info.txt
+            plugin-src/ios-distribution/SHA256SUMS.txt
+          if-no-files-found: error

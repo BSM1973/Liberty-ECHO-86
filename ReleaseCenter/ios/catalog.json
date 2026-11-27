@@ -3,9 +3,9 @@
   "products": {
     "love-eq": {
       "repository": "BSM1973/Liberty-LOVE-EQ",
-      "sha": "9f95d5bfdb8a289b7d3dca3f543592901aafcf3a",
+      "sha": "5f0365416aa7e3f03fc2b54bcde25c1bd368641f",
       "name": "LOVE EQ",
-      "version": "0.8.0",
+      "version": "1.0.0",
       "target": "LoveEQ",
       "bundle_id": "com.libertymusicsoftware.loveeq",
       "environment": "ios-love-eq",

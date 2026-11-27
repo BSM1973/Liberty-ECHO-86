@@ -154,7 +154,9 @@ jobs:
           PY
           for bundle in "$app" "$ext"; do
             exe=$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$bundle/Info.plist")
-            lipo -verify_arch arm64 "$bundle/$exe"
+            test -f "$bundle/$exe"
+            xcrun lipo "$bundle/$exe" -verify_arch arm64
+            xcrun lipo "$bundle/$exe" -archs
           done
           printf '%s\n' "$SOURCE_SHA" > report/source-sha.txt
           printf '%s\n' 'Unsigned diagnostic; not an installable IPA.' > report/README.txt

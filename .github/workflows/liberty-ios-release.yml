@@ -71,6 +71,44 @@ jobs:
           ref: ${{ needs.resolve.outputs.sha }}
           persist-credentials: false
           path: plugin-src
+      - name: Select installed Xcode with iOS SDK 26+
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, os, plistlib, re, subprocess, sys
+          candidates = []
+          for app in glob.glob("/Applications/Xcode*.app"):
+              developer = app + "/Contents/Developer"
+              try:
+                  with open(app + "/Contents/Info.plist", "rb") as f:
+                      version = plistlib.load(f)["CFBundleShortVersionString"]
+                  if not re.fullmatch(r"\d+(?:\.\d+)*", version):
+                      continue
+                  if re.search(r"beta|preview|\bRC\b", app, re.I):
+                      continue
+                  parsed = tuple(map(int, version.split(".")))
+                  if parsed[0] < 26:
+                      continue
+                  env = dict(os.environ, DEVELOPER_DIR=developer)
+                  sdk = subprocess.check_output(["/usr/bin/xcrun", "--sdk", "iphoneos", "--show-sdk-version"], env=env, text=True, stderr=subprocess.DEVNULL).strip()
+                  if int(sdk.split(".")[0]) >= 26:
+                      candidates.append((parsed, developer, sdk))
+              except (OSError, ValueError, KeyError, subprocess.CalledProcessError):
+                  continue
+          if not candidates:
+              print("::error::No installed stable Xcode 26+ with iPhoneOS SDK 26+")
+              print("Installed paths:", glob.glob("/Applications/Xcode*.app"))
+              sys.exit(1)
+          _, developer, sdk = max(candidates)
+          print("Selected", developer, "iPhoneOS SDK", sdk)
+          subprocess.run(["sudo", "xcode-select", "--switch", developer], check=True)
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write("DEVELOPER_DIR=" + developer + "\n")
+          env = dict(os.environ, DEVELOPER_DIR=developer)
+          subprocess.run(["/usr/bin/xcodebuild", "-version"], env=env, check=True)
+          subprocess.run(["/usr/bin/xcrun", "--sdk", "iphoneos", "--show-sdk-version"], env=env, check=True)
+          PY
       - name: Verify source and SDK
         shell: bash
         run: |
@@ -139,6 +177,44 @@ jobs:
           ref: ${{ needs.resolve.outputs.sha }}
           persist-credentials: false
           path: plugin-src
+      - name: Select installed Xcode with iOS SDK 26+
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, os, plistlib, re, subprocess, sys
+          candidates = []
+          for app in glob.glob("/Applications/Xcode*.app"):
+              developer = app + "/Contents/Developer"
+              try:
+                  with open(app + "/Contents/Info.plist", "rb") as f:
+                      version = plistlib.load(f)["CFBundleShortVersionString"]
+                  if not re.fullmatch(r"\d+(?:\.\d+)*", version):
+                      continue
+                  if re.search(r"beta|preview|\bRC\b", app, re.I):
+                      continue
+                  parsed = tuple(map(int, version.split(".")))
+                  if parsed[0] < 26:
+                      continue
+                  env = dict(os.environ, DEVELOPER_DIR=developer)
+                  sdk = subprocess.check_output(["/usr/bin/xcrun", "--sdk", "iphoneos", "--show-sdk-version"], env=env, text=True, stderr=subprocess.DEVNULL).strip()
+                  if int(sdk.split(".")[0]) >= 26:
+                      candidates.append((parsed, developer, sdk))
+              except (OSError, ValueError, KeyError, subprocess.CalledProcessError):
+                  continue
+          if not candidates:
+              print("::error::No installed stable Xcode 26+ with iPhoneOS SDK 26+")
+              print("Installed paths:", glob.glob("/Applications/Xcode*.app"))
+              sys.exit(1)
+          _, developer, sdk = max(candidates)
+          print("Selected", developer, "iPhoneOS SDK", sdk)
+          subprocess.run(["sudo", "xcode-select", "--switch", developer], check=True)
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write("DEVELOPER_DIR=" + developer + "\n")
+          env = dict(os.environ, DEVELOPER_DIR=developer)
+          subprocess.run(["/usr/bin/xcodebuild", "-version"], env=env, check=True)
+          subprocess.run(["/usr/bin/xcrun", "--sdk", "iphoneos", "--show-sdk-version"], env=env, check=True)
+          PY
       - name: Verify pinned source before signing
         env:
           SOURCE_SHA: ${{ needs.resolve.outputs.sha }}

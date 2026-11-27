@@ -118,6 +118,14 @@ jobs:
           sdk=$(xcrun --sdk iphoneos --show-sdk-version)
           [[ "${sdk%%.*}" -ge 26 ]] || { echo "::error::Select Xcode 26 or newer"; exit 1; }
           bash -n plugin-src/scripts/ios_testflight.sh
+      - name: Check mobile layout geometry (when provided)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f plugin-src/tests/mobile_touch_layout_test.cpp ]]; then
+            xcrun clang++ -std=c++17 -O2 -I plugin-src/Source plugin-src/tests/mobile_touch_layout_test.cpp -o /tmp/mobile-touch-layout-test
+            /tmp/mobile-touch-layout-test
+          fi
       - name: Build unsigned application and AUv3
         shell: bash
         run: |

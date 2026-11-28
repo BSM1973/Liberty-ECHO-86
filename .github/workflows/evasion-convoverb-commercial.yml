@@ -1,5 +1,5 @@
-name: Evasion ConvoVerb - Liberty Release Center v0.9.0
-run-name: Evasion ConvoVerb 0.9.0 - pre-commercial quality control
+name: Evasion ConvoVerb - Liberty Release Center v0.9.1
+run-name: Evasion ConvoVerb 0.9.1 - pre-commercial quality control
 on:
   push:
     branches: [main]
@@ -13,11 +13,11 @@ concurrency:
   group: liberty-release-center-evasion-convoverb
   cancel-in-progress: false
 env:
-  SOURCE_SHA: 'e7d8670979650633559a460b837066accb2c752c'
+  SOURCE_SHA: 'b75ac88c259f32427164588a7bb6671fd3908bb0'
   LIBERTY_PRODUCT_NAME: Evasion ConvoVerb
   LIBERTY_TARGET: EvasionConvoVerb
   LIBERTY_SLUG: evasion-convoverb
-  LIBERTY_VERSION: '0.9.0'
+  LIBERTY_VERSION: '0.9.1'
 jobs:
   mac-build:
     name: ARM64 AU/VST3 - full QC without signing secrets
@@ -41,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git -C plugin-src rev-parse HEAD)" = "$SOURCE_SHA"
-          grep -Fq 'project(EvasionConvoVerb VERSION 0.9.0' plugin-src/CMakeLists.txt
+          grep -Fq 'project(EvasionConvoVerb VERSION 0.9.1' plugin-src/CMakeLists.txt
           (cd plugin-src && python3 tests/utf8_check.py)
       - name: Configure, compile and test
         shell: bash
@@ -58,8 +58,19 @@ jobs:
           type="$(/usr/libexec/PlistBuddy -c 'Print :AudioComponents:0:type' "$bundle/Contents/Info.plist")"
           subtype="$(/usr/libexec/PlistBuddy -c 'Print :AudioComponents:0:subtype' "$bundle/Contents/Info.plist")"
           manufacturer="$(/usr/libexec/PlistBuddy -c 'Print :AudioComponents:0:manufacturer' "$bundle/Contents/Info.plist")"
-          auval -v "$type" "$subtype" "$manufacturer" 2>&1 | tee build/auval.log
-          grep -F 'AU VALIDATION SUCCEEDED' build/auval.log
+          killall AudioComponentRegistrar 2>/dev/null || true
+          rm -f "$HOME/Library/Caches/AudioUnitCache/com.apple.audiounits.cache" "$HOME/Library/Caches/AudioUnitCache/com.apple.audiounits.sandboxed.cache"
+          validated=0
+          for attempt in 1 2 3 4 5; do
+            /usr/bin/auval -a > build/au-discovery.log 2>&1 || true
+            if /usr/bin/auval -v "$type" "$subtype" "$manufacturer" > build/auval.log 2>&1 && grep -Fq 'AU VALIDATION SUCCEEDED' build/auval.log; then
+              validated=1
+              break
+            fi
+            sleep 3
+          done
+          cat build/auval.log
+          test "$validated" = 1
       - name: Preserve validated native ARM64 AU and VST3 bundles
         shell: bash
         run: |
@@ -78,7 +89,7 @@ jobs:
           done
       - uses: actions/upload-artifact@v4
         with:
-          name: evasion-convoverb-v0.9.0-validated-unsigned-arm64
+          name: evasion-convoverb-v0.9.1-validated-unsigned-arm64
           path: exported-mac/*.zip
           if-no-files-found: error
           compression-level: 0
@@ -86,7 +97,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Evasion-ConvoVerb-v0.9.0-QC-macOS-ARM64
+          name: Evasion-ConvoVerb-v0.9.1-QC-macOS-ARM64
           path: |
             build/Testing/Temporary/LastTest.log
             build/visual-qa/*.png
@@ -105,7 +116,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: evasion-convoverb-v0.9.0-validated-unsigned-arm64
+          name: evasion-convoverb-v0.9.1-validated-unsigned-arm64
           path: incoming
       - name: Existing trusted Release Center signing and notarization
         shell: bash
@@ -121,8 +132,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          old="release-output/LIBERTY-evasion-convoverb-macOS-Universal-v0.9.0-SIGNED-NOTARIZED.pkg"
-          pkg="release-output/LIBERTY-evasion-convoverb-macOS-ARM64-v0.9.0-SIGNED-NOTARIZED.pkg"
+          old="release-output/LIBERTY-evasion-convoverb-macOS-Universal-v0.9.1-SIGNED-NOTARIZED.pkg"
+          pkg="release-output/LIBERTY-evasion-convoverb-macOS-ARM64-v0.9.1-SIGNED-NOTARIZED.pkg"
           test -s "$old"
           mv "$old" "$pkg"
           /usr/sbin/pkgutil --check-signature "$pkg"
@@ -132,21 +143,21 @@ jobs:
       - uses: actions/upload-artifact@v4
         id: published
         with:
-          name: Evasion-ConvoVerb-v0.9.0-macOS-ARM64-SIGNED-NOTARIZED-PKG
+          name: Evasion-ConvoVerb-v0.9.1-macOS-ARM64-SIGNED-NOTARIZED-PKG
           path: release-output/*.pkg
           if-no-files-found: error
           compression-level: 0
           retention-days: 90
       - uses: actions/download-artifact@v4
         with:
-          artifact-ids: ${{ steps.published.outputs.artifact-id }}
+          name: Evasion-ConvoVerb-v0.9.1-macOS-ARM64-SIGNED-NOTARIZED-PKG
           path: verified-macos
           merge-multiple: true
       - name: Verify actual downloadable package
         shell: bash
         run: |
           set -euo pipefail
-          name="LIBERTY-evasion-convoverb-macOS-ARM64-v0.9.0-SIGNED-NOTARIZED.pkg"
+          name="LIBERTY-evasion-convoverb-macOS-ARM64-v0.9.1-SIGNED-NOTARIZED.pkg"
           cmp "release-output/$name" "verified-macos/$name"
           /usr/sbin/pkgutil --check-signature "verified-macos/$name"
           /usr/bin/xcrun stapler validate "verified-macos/$name"
@@ -196,20 +207,20 @@ jobs:
       - uses: actions/upload-artifact@v4
         id: published
         with:
-          name: Evasion-ConvoVerb-v0.9.0-Windows-x64-EXE-UNSIGNED
+          name: Evasion-ConvoVerb-v0.9.1-Windows-x64-EXE-UNSIGNED
           path: release-output/*.exe
           if-no-files-found: error
           compression-level: 0
           retention-days: 90
       - uses: actions/download-artifact@v4
         with:
-          artifact-ids: ${{ steps.published.outputs.artifact-id }}
+          name: Evasion-ConvoVerb-v0.9.1-Windows-x64-EXE-UNSIGNED
           path: verified-windows
           merge-multiple: true
       - name: Verify downloaded EXE
         shell: pwsh
         run: |
-          $name="LIBERTY-evasion-convoverb-Windows-x64-v0.9.0-UNSIGNED.exe"
+          $name="LIBERTY-evasion-convoverb-Windows-x64-v0.9.1-UNSIGNED.exe"
           $file=Join-Path verified-windows $name
           if (!(Test-Path $file) -or (Get-Item $file).Length -lt 100000) { throw "Installer missing or invalid" }
           if ((Get-FileHash $file -Algorithm SHA256).Hash -ne (Get-FileHash (Join-Path release-output $name) -Algorithm SHA256).Hash) { throw "Hash mismatch" }
@@ -217,7 +228,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Evasion-ConvoVerb-v0.9.0-QC-Windows-x64
+          name: Evasion-ConvoVerb-v0.9.1-QC-Windows-x64
           path: |
             build/Testing/Temporary/LastTest.log
             build/visual-qa/*.png
@@ -230,11 +241,11 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: Evasion-ConvoVerb-v0.9.0-macOS-ARM64-SIGNED-NOTARIZED-PKG
+          name: Evasion-ConvoVerb-v0.9.1-macOS-ARM64-SIGNED-NOTARIZED-PKG
           path: mac
       - uses: actions/download-artifact@v4
         with:
-          name: Evasion-ConvoVerb-v0.9.0-Windows-x64-EXE-UNSIGNED
+          name: Evasion-ConvoVerb-v0.9.1-Windows-x64-EXE-UNSIGNED
           path: win
       - uses: actions/checkout@v4
         with:
@@ -252,13 +263,13 @@ jobs:
             cp plugin-src/docs/MANUEL-FR.md plugin-src/docs/MANUAL-EN.md "$dir/"
             (cd "$dir"; sha256sum * > SHA256SUMS.txt)
           done
-          (cd mac; zip -0 -r ../commercial/Evasion-ConvoVerb-v0.9.0-macOS-ARM64.zip .)
-          (cd win; zip -0 -r ../commercial/Evasion-ConvoVerb-v0.9.0-Windows-x64.zip .)
-          unzip -tq commercial/Evasion-ConvoVerb-v0.9.0-macOS-ARM64.zip
-          unzip -tq commercial/Evasion-ConvoVerb-v0.9.0-Windows-x64.zip
+          (cd mac; zip -0 -r ../commercial/Evasion-ConvoVerb-v0.9.1-macOS-ARM64.zip .)
+          (cd win; zip -0 -r ../commercial/Evasion-ConvoVerb-v0.9.1-Windows-x64.zip .)
+          unzip -tq commercial/Evasion-ConvoVerb-v0.9.1-macOS-ARM64.zip
+          unzip -tq commercial/Evasion-ConvoVerb-v0.9.1-Windows-x64.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: Evasion-ConvoVerb-v0.9.0-PRE-COMMERCIAL-ARCHIVES
+          name: Evasion-ConvoVerb-v0.9.1-PRE-COMMERCIAL-ARCHIVES
           path: commercial/*.zip
           if-no-files-found: error
           compression-level: 0
